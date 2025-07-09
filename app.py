@@ -1,39 +1,76 @@
-# app.py
 import streamlit as st
 from googleapiclient.discovery import build
 
-st.set_page_config(page_title="YouTube Video Info", layout="centered")
+# Page setup
+st.set_page_config(page_title="YouTube Channel Video Info", layout="centered")
+st.title("📺 YouTube Channel Video Info Viewer")
 
-st.title("🎥 YouTube Video Info Viewer")
+# Inputs
+yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_x5XG1OV2P6uZZ5FSM9Ttw)")
+num_videos = st.slider("🎬 Number of recent videos to fetch", 1, 10, 3)
 
-# Input fields
-api_key = st.text_input("🔑 Enter your YouTube API Key", type="password")
-video_id = st.text_input("🎬 Enter a YouTube Video ID (e.g., eCjRD9qzk1o)")
+# Get Upload Playlist ID
+def get_upload_playlist(youtube, channel_id):
+    data = youtube.channels().list(
+        part="contentDetails",
+        id=channel_id
+    ).execute()
+    return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-if st.button("Fetch Info"):
-    if not api_key or not video_id:
-        st.error("Please enter both API Key and Video ID")
+# Get video IDs from uploads playlist
+def get_video_ids(youtube, playlist_id, max_videos):
+    videos = []
+    next_token = None
+    while len(videos) < max_videos:
+        res = youtube.playlistItems().list(
+            part="contentDetails",
+            playlistId=playlist_id,
+            maxResults=min(50, max_videos - len(videos)),
+            pageToken=next_token
+        ).execute()
+        for item in res["items"]:
+            videos.append(item["contentDetails"]["videoId"])
+        next_token = res.get("nextPageToken")
+        if not next_token:
+            break
+    return videos
+
+# Get video metadata
+def get_video_info(youtube, video_id):
+    res = youtube.videos().list(
+        part="snippet,statistics",
+        id=video_id
+    ).execute()
+    item = res["items"][0]
+    return {
+        "title": item["snippet"]["title"],
+        "description": item["snippet"]["description"],
+        "tags": item["snippet"].get("tags", []),
+        "views": item["statistics"].get("viewCount", "0")
+    }
+
+# Button
+if st.button("🔍 Fetch Video Info"):
+    if not yt_api_key or not channel_id:
+        st.error("Please provide both API key and channel ID.")
     else:
-        try:
-            youtube = build("youtube", "v3", developerKey=api_key)
-            resp = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
-            if not resp["items"]:
-                st.error("Invalid or private video ID.")
-            else:
-                item = resp["items"][0]
-                st.success("✅ Video Details:")
-                st.subheader("📺 Title")
-                st.write(item["snippet"]["title"])
+        with st.spinner("Fetching data from YouTube..."):
+            try:
+                youtube = build("youtube", "v3", developerKey=yt_api_key)
+                playlist_id = get_upload_playlist(youtube, channel_id)
+                video_ids = get_video_ids(youtube, playlist_id, num_videos)
 
-                st.subheader("📝 Description")
-                st.code(item["snippet"]["description"])
+                st.success(f"Fetched {len(video_ids)} videos from channel.")
+                for i, vid in enumerate(video_ids, start=1):
+                    video_data = get_video_info(youtube, vid)
 
-                tags = item["snippet"].get("tags", [])
-                st.subheader("🏷️ Tags")
-                st.write(", ".join(tags) if tags else "No tags")
+                    st.markdown(f"---")
+                    st.subheader(f"🎬 Video {i}: {video_data['title']}")
+                    st.write(f"👁️ **Views:** {video_data['views']}")
+                    st.write("🏷️ **Tags:**", ", ".join(video_data["tags"]) if video_data["tags"] else "None")
+                    with st.expander("📝 Description"):
+                        st.code(video_data["description"])
 
-                views = item["statistics"].get("viewCount", "0")
-                st.subheader("👁️ Views")
-                st.write(views)
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
