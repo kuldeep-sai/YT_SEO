@@ -83,11 +83,12 @@ if submitted:
             df = pd.DataFrame(data)
 
             # Convert to Excel
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='YouTube Videos')
-                writer.save()
-            output.seek(0)
+            # Convert to Excel
+output = BytesIO()
+with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    df.to_excel(writer, index=False, sheet_name='YouTube Videos')
+output.seek(0)
+
 
             # Download button
             st.download_button(
