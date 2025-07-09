@@ -13,8 +13,8 @@ st.markdown("Export videos from your YouTube channel in defined **ranges of 50**
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-    total_videos = st.slider("🎬 Total videos to fetch", min_value=50, max_value=500, step=50, value=100)
-    submit = st.form_submit_button("📥 Fetch Videos")
+    total_to_fetch = st.selectbox("🎯 Select batch to fetch", options=["1–50", "51–100", "101–150", "151–200", "201–250", "251–300", "301–350", "351–400", "401–450", "451–500"])
+    submit = st.form_submit_button("📅 Fetch Videos")
 
 # Helper functions
 def get_upload_playlist(youtube, channel_id):
@@ -54,56 +54,53 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-# Initialize session state
-if "video_list" not in st.session_state:
-    st.session_state.video_list = []
-
-# Fetch data
+# Fetch logic
 if submit:
     if not yt_api_key or not channel_id:
         st.error("❌ Please enter both API Key and Channel ID.")
     else:
         try:
-            with st.spinner("📡 Fetching video metadata..."):
-                youtube = build("youtube", "v3", developerKey=yt_api_key)
-                playlist_id = get_upload_playlist(youtube, channel_id)
-                video_meta = get_video_ids(youtube, playlist_id, max_videos=total_videos)
+            youtube = build("youtube", "v3", developerKey=yt_api_key)
+            playlist_id = get_upload_playlist(youtube, channel_id)
 
-                # Sort newest first
+            # Determine range
+            range_map = {
+                "1–50": (0, 50),
+                "51–100": (50, 100),
+                "101–150": (100, 150),
+                "151–200": (150, 200),
+                "201–250": (200, 250),
+                "251–300": (250, 300),
+                "301–350": (300, 350),
+                "351–400": (350, 400),
+                "401–450": (400, 450),
+                "451–500": (450, 500)
+            }
+            start, end = range_map[total_to_fetch]
+
+            with st.spinner("📱 Fetching videos..."):
+                video_meta = get_video_ids(youtube, playlist_id, max_videos=end)
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
-                st.session_state.video_list = video_meta_sorted
-                st.success(f"✅ Fetched {len(video_meta_sorted)} videos.")
+                selected_batch = video_meta_sorted[start:end]
+
+                video_details = [get_video_info(youtube, v["video_id"]) for v in selected_batch]
+
+                df = pd.DataFrame(video_details)
+                st.write(f"📄 Showing videos {start+1} to {end}")
+                st.dataframe(df)
+
+                # Excel download
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False, sheet_name="Videos")
+                output.seek(0)
+
+                st.download_button(
+                    label=f"⬇️ Download Excel for {total_to_fetch}",
+                    data=output,
+                    file_name=f"youtube_videos_{start+1}_{end}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
-
-# Show range selection
-if st.session_state.video_list:
-    total = len(st.session_state.video_list)
-    ranges = [f"{i+1}–{min(i+50, total)}" for i in range(0, total, 50)]
-
-    selected_range = st.selectbox("📦 Select video range to download", ranges)
-
-    # Parse range
-    start, end = map(int, selected_range.replace("–", "-").split("-"))
-    selected_video_ids = st.session_state.video_list[start-1:end]
-
-    with st.spinner(f"🔍 Fetching video details for {len(selected_video_ids)} videos..."):
-        youtube = build("youtube", "v3", developerKey=yt_api_key)
-        video_details = [get_video_info(youtube, v["video_id"]) for v in selected_video_ids]
-
-        df = pd.DataFrame(video_details)
-        st.write(f"📄 Showing videos {start} to {end}")
-        st.dataframe(df)
-
-        # Excel download
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name="Videos")
-        output.seek(0)
-
-        st.download_button(
-            label=f"⬇️ Download Excel for Videos {start}–{end}",
-            data=output,
-            file_name=f"youtube_videos_{start}_{end}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
