@@ -3,6 +3,7 @@ from googleapiclient.discovery import build
 import pandas as pd
 from io import BytesIO
 import openai
+import time
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
@@ -79,6 +80,8 @@ def generate_seo_tags(video):
             temperature=0.7
         )
         return response.choices[0].message.content
+    except openai.RateLimitError:
+        return "⚠️ Rate limit exceeded. Please try again later."
     except Exception as e:
         return f"OpenAI Error: {e}"
 
@@ -113,14 +116,14 @@ if submit:
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
                 selected_batch = video_meta_sorted[start:end]
 
-                # inside the loop
-for v in selected_batch:
-    info = get_video_info(youtube, v["video_id"])
-    if enable_seo and openai_key:
-        seo_output = generate_seo_tags(info)
-        info["seo_output"] = seo_output
-        time.sleep(1.5)  # delay to reduce risk of hitting rate limits
-    video_details.append(info)
+                video_details = []
+                for v in selected_batch:
+                    info = get_video_info(youtube, v["video_id"])
+                    if enable_seo and openai_key:
+                        seo_output = generate_seo_tags(info)
+                        info["seo_output"] = seo_output
+                        time.sleep(1.5)  # to avoid hitting rate limits
+                    video_details.append(info)
 
                 df = pd.DataFrame(video_details)
                 st.write(f"📄 Showing videos {start+1} to {end}")
