@@ -9,14 +9,15 @@ import time
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
 st.title("📊 YouTube Channel Video Exporter + SEO Generator")
 
-st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100). Optionally generate SEO-optimized titles, descriptions, and keywords using OpenAI.")
+st.markdown("Export videos from your YouTube channel in defined batches. Optionally generate SEO-optimized titles, descriptions, and keywords using OpenAI.")
 
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
     openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-    total_to_fetch = st.selectbox("🎯 Select batch to fetch", options=["1–50", "51–100", "101–150", "151–200", "201–250", "251–300", "301–350", "351–400", "401–450", "451–500"])
+    start_index = st.number_input("📍 Start from video #", min_value=0, value=0, step=1)
+    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     submit = st.form_submit_button("📥 Fetch Videos")
 
@@ -96,25 +97,10 @@ if submit:
                 openai.api_key = openai_key
             playlist_id = get_upload_playlist(youtube, channel_id)
 
-            # Determine range
-            range_map = {
-                "1–50": (0, 50),
-                "51–100": (50, 100),
-                "101–150": (100, 150),
-                "151–200": (150, 200),
-                "201–250": (200, 250),
-                "251–300": (250, 300),
-                "301–350": (300, 350),
-                "351–400": (350, 400),
-                "401–450": (400, 450),
-                "451–500": (450, 500)
-            }
-            start, end = range_map[total_to_fetch]
-
             with st.spinner("📡 Fetching videos..."):
-                video_meta = get_video_ids(youtube, playlist_id, max_videos=end)
+                video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
-                selected_batch = video_meta_sorted[start:end]
+                selected_batch = video_meta_sorted[start_index:start_index + num_videos]
 
                 video_details = []
                 for v in selected_batch:
@@ -122,11 +108,11 @@ if submit:
                     if enable_seo and openai_key:
                         seo_output = generate_seo_tags(info)
                         info["seo_output"] = seo_output
-                        time.sleep(1.5)  # to avoid hitting rate limits
+                        time.sleep(5)  # delay to avoid OpenAI rate limits
                     video_details.append(info)
 
                 df = pd.DataFrame(video_details)
-                st.write(f"📄 Showing videos {start+1} to {end}")
+                st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
                 st.dataframe(df)
 
                 # Excel download
@@ -136,9 +122,9 @@ if submit:
                 output.seek(0)
 
                 st.download_button(
-                    label=f"⬇️ Download Excel for {total_to_fetch}",
+                    label=f"⬇️ Download Excel for videos {start_index + 1} to {start_index + num_videos}",
                     data=output,
-                    file_name=f"youtube_videos_{start+1}_{end}.xlsx",
+                    file_name=f"youtube_videos_{start_index + 1}_{start_index + num_videos}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
