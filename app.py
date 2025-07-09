@@ -7,7 +7,7 @@ from io import BytesIO
 st.set_page_config(page_title="YouTube Channel to Excel", layout="centered")
 st.title("📊 YouTube Channel Video Exporter")
 
-st.markdown("🔽 Enter your API credentials and get the latest 50 videos as an Excel file.")
+st.markdown("🔽 Enter your API credentials to export the latest **20 videos** to Excel.")
 
 # Inputs
 with st.form(key="form"):
@@ -23,7 +23,7 @@ def get_upload_playlist(youtube, channel_id):
     ).execute()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_video_ids(youtube, playlist_id, max_videos=50):
+def get_video_ids(youtube, playlist_id, max_videos=20):  # 🔒 limit to 20
     videos = []
     next_token = None
     while len(videos) < max_videos:
@@ -61,10 +61,10 @@ if submit:
         st.error("❌ Please enter both API Key and Channel ID.")
     else:
         try:
-            with st.spinner("📡 Fetching videos..."):
+            with st.spinner("📡 Fetching up to 20 recent videos..."):
                 youtube = build("youtube", "v3", developerKey=yt_api_key)
                 playlist_id = get_upload_playlist(youtube, channel_id)
-                video_ids = get_video_ids(youtube, playlist_id, max_videos=50)
+                video_ids = get_video_ids(youtube, playlist_id, max_videos=20)
 
                 videos_data = []
                 for vid in video_ids:
@@ -73,11 +73,10 @@ if submit:
 
                 df = pd.DataFrame(videos_data)
 
-                # Create in-memory Excel file
+                # Create Excel file in memory
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name="YouTube Videos")
-                    writer.save()
                 output.seek(0)
 
                 st.success("✅ Fetched and ready to download!")
@@ -89,7 +88,7 @@ if submit:
                 st.download_button(
                     label="📥 Download Excel",
                     data=output,
-                    file_name="youtube_channel_videos.xlsx",
+                    file_name="youtube_channel_20_videos.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
