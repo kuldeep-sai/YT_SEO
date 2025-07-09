@@ -4,98 +4,94 @@ import pandas as pd
 from io import BytesIO
 
 # Page setup
-st.set_page_config(page_title="YouTube Channel Video Export", layout="centered")
-st.title("📺 Export All YouTube Channel Videos to Excel")
+st.set_page_config(page_title="YouTube Channel to Excel", layout="centered")
+st.title("📊 YouTube Channel Video Exporter")
 
-st.markdown("Enter your credentials below to fetch all videos from a channel and download them as an Excel file.")
+st.markdown("🔽 Enter your API credentials and get the latest 50 videos as an Excel file.")
 
-# Input form
-with st.form("input_form"):
+# Inputs
+with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_x5XG1OV2P6uZZ5FSM9Ttw)")
-    submitted = st.form_submit_button("📥 Fetch & Export")
+    submit = st.form_submit_button("📥 Fetch Videos & Download Excel")
 
-# YouTube API helpers
+# YouTube API functions
 def get_upload_playlist(youtube, channel_id):
-    response = youtube.channels().list(
+    data = youtube.channels().list(
         part="contentDetails",
         id=channel_id
     ).execute()
-    return response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+    return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_all_video_ids(youtube, playlist_id):
-    video_ids = []
-    next_page_token = None
-    while True:
-        response = youtube.playlistItems().list(
+def get_video_ids(youtube, playlist_id, max_videos=50):
+    videos = []
+    next_token = None
+    while len(videos) < max_videos:
+        res = youtube.playlistItems().list(
             part="contentDetails",
             playlistId=playlist_id,
-            maxResults=50,
-            pageToken=next_page_token
+            maxResults=min(50, max_videos - len(videos)),
+            pageToken=next_token
         ).execute()
-        for item in response["items"]:
-            video_ids.append(item["contentDetails"]["videoId"])
-        next_page_token = response.get("nextPageToken")
-        if not next_page_token:
+        for item in res["items"]:
+            videos.append(item["contentDetails"]["videoId"])
+        next_token = res.get("nextPageToken")
+        if not next_token:
             break
-    return video_ids
+    return videos
 
-def get_video_metadata(youtube, video_id):
-    response = youtube.videos().list(
+def get_video_info(youtube, video_id):
+    res = youtube.videos().list(
         part="snippet,statistics",
         id=video_id
     ).execute()
-    item = response["items"][0]
+    item = res["items"][0]
     return {
-        "Video ID": video_id,
-        "Title": item["snippet"]["title"],
-        "Description": item["snippet"]["description"],
-        "Tags": ", ".join(item["snippet"].get("tags", [])),
-        "Views": item["statistics"].get("viewCount", "0"),
-        "Video URL": f"https://www.youtube.com/watch?v={video_id}"
+        "video_id": video_id,
+        "title": item["snippet"]["title"],
+        "description": item["snippet"]["description"],
+        "tags": ", ".join(item["snippet"].get("tags", [])),
+        "views": item["statistics"].get("viewCount", "0"),
+        "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-# On form submit
-if submitted:
+# On form submission
+if submit:
     if not yt_api_key or not channel_id:
-        st.error("Please provide both API key and channel ID.")
+        st.error("❌ Please enter both API Key and Channel ID.")
     else:
         try:
-    st.info("🔍 Connecting to YouTube API...")
-    youtube = build("youtube", "v3", developerKey=yt_api_key)
+            with st.spinner("📡 Fetching videos..."):
+                youtube = build("youtube", "v3", developerKey=yt_api_key)
+                playlist_id = get_upload_playlist(youtube, channel_id)
+                video_ids = get_video_ids(youtube, playlist_id, max_videos=50)
 
-    st.info("📥 Getting upload playlist...")
-    uploads_playlist = get_upload_playlist(youtube, channel_id)
+                videos_data = []
+                for vid in video_ids:
+                    info = get_video_info(youtube, vid)
+                    videos_data.append(info)
 
-    st.info("📦 Fetching all video IDs...")
-    video_ids = get_all_video_ids(youtube, uploads_playlist)
+                df = pd.DataFrame(videos_data)
 
-    st.success(f"✅ Found {len(video_ids)} videos.")
+                # Create in-memory Excel file
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False, sheet_name="YouTube Videos")
+                    writer.save()
+                output.seek(0)
 
-    st.info("⏳ Fetching metadata for each video...")
-    data = []
-    for idx, vid in enumerate(video_ids):
-        metadata = get_video_metadata(youtube, vid)
-        data.append(metadata)
-        st.progress((idx + 1) / len(video_ids))
+                st.success("✅ Fetched and ready to download!")
 
-    # Convert to Excel
-    df = pd.DataFrame(data)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='YouTube Videos')
-    output.seek(0)
+                # Show preview
+                st.dataframe(df.head())
 
-    # Download button
-    st.download_button(
-        label="📥 Download Excel File",
-        data=output,
-        file_name="youtube_channel_videos.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+                # Download button
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=output,
+                    file_name="youtube_channel_videos.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
-    st.success("🎉 Download ready!")
-
-except Exception as e:
-    st.error(f"❌ Error: {str(e)}")
-
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
