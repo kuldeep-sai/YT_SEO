@@ -23,7 +23,7 @@ def get_upload_playlist(youtube, channel_id):
     ).execute()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_video_ids(youtube, playlist_id, max_videos=20):  # 🔒 limit to 20
+def get_video_ids(youtube, playlist_id, max_videos=50):  # 🔒 limit to 50
     videos = []
     next_token = None
     while len(videos) < max_videos:
