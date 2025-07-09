@@ -61,46 +61,41 @@ if submitted:
         st.error("Please provide both API key and channel ID.")
     else:
         try:
-            st.info("🔍 Connecting to YouTube API...")
-            youtube = build("youtube", "v3", developerKey=yt_api_key)
+    st.info("🔍 Connecting to YouTube API...")
+    youtube = build("youtube", "v3", developerKey=yt_api_key)
 
-            st.info("📥 Getting upload playlist...")
-            uploads_playlist = get_upload_playlist(youtube, channel_id)
+    st.info("📥 Getting upload playlist...")
+    uploads_playlist = get_upload_playlist(youtube, channel_id)
 
-            st.info("📦 Fetching all video IDs...")
-            video_ids = get_all_video_ids(youtube, uploads_playlist)
+    st.info("📦 Fetching all video IDs...")
+    video_ids = get_all_video_ids(youtube, uploads_playlist)
 
-            st.success(f"✅ Found {len(video_ids)} videos.")
+    st.success(f"✅ Found {len(video_ids)} videos.")
 
-            st.info("⏳ Fetching metadata for each video...")
-            data = []
-            for idx, vid in enumerate(video_ids):
-                metadata = get_video_metadata(youtube, vid)
-                data.append(metadata)
-                st.progress((idx + 1) / len(video_ids))
+    st.info("⏳ Fetching metadata for each video...")
+    data = []
+    for idx, vid in enumerate(video_ids):
+        metadata = get_video_metadata(youtube, vid)
+        data.append(metadata)
+        st.progress((idx + 1) / len(video_ids))
 
-            # Create DataFrame
-            df = pd.DataFrame(data)
+    # Convert to Excel
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='YouTube Videos')
+    output.seek(0)
 
-            # Convert to Excel
-            # Convert to Excel
-# Convert to Excel
-output = BytesIO()
-with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-    df.to_excel(writer, index=False, sheet_name='YouTube Videos')
-output.seek(0)
+    # Download button
+    st.download_button(
+        label="📥 Download Excel File",
+        data=output,
+        file_name="youtube_channel_videos.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
+    st.success("🎉 Download ready!")
 
+except Exception as e:
+    st.error(f"❌ Error: {str(e)}")
 
-            # Download button
-            st.download_button(
-                label="📥 Download Excel File",
-                data=output,
-                file_name="youtube_channel_videos.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-            st.success("🎉 Download ready!")
-
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
