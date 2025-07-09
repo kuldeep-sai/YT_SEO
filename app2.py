@@ -4,21 +4,19 @@ import pandas as pd
 from io import BytesIO
 import openai
 import time
-import requests
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
-st.title("📊 YouTube Channel Video Exporter + SEO Generator")
+st.title("📊 YouTube Channel Video Exporter + SEO Generator + Transcript")
 
-st.markdown("Export videos from your YouTube channel in defined batches. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts using OpenAI.")
+st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100). Optionally generate SEO-optimized titles, descriptions, keywords, and simulated transcripts using OpenAI.")
 
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-    openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+    openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO & transcript)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-    start_index = st.number_input("📍 Start from video #", min_value=0, value=0, step=1)
-    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
+    total_to_fetch = st.selectbox("🎯 Select batch to fetch", options=["1–50", "51–100", "101–150", "151–200", "201–250", "251–300", "301–350", "351–400", "401–450", "451–500"])
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     enable_transcript = st.checkbox("📝 Generate Video Transcript using GPT")
     submit = st.form_submit_button("📥 Fetch Videos")
@@ -61,6 +59,22 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
+def safe_openai_call(prompt, retries=3):
+    for i in range(retries):
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except openai.RateLimitError:
+            wait = 2 ** (i + 1)
+            time.sleep(wait)
+        except Exception as e:
+            return f"OpenAI Error: {e}"
+    return "⚠️ Failed after retries."
+
 def generate_seo_tags(video):
     prompt = f"""
     Analyze the following YouTube video metadata:
@@ -76,32 +90,16 @@ def generate_seo_tags(video):
     - A list of 10 SEO-relevant hashtags
     - A comma-separated list of SEO keywords
     """
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return response.choices[0].message.content
-    except openai.RateLimitError:
-        return "⚠️ Rate limit exceeded. Please try again later."
-    except Exception as e:
-        return f"OpenAI Error: {e}"
+    return safe_openai_call(prompt)
 
-def generate_transcript(video_url):
+def generate_transcript(video):
     prompt = f"""
-    Provide a simulated transcript for the following YouTube video based on the title and description:
-    {video_url}
+    Generate a simulated transcript for this YouTube video titled '{video['title']}'. Make it 100–150 words based on the topic implied in the title and description.
+
+    Description:
+    {video['description']}
     """
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.6
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Transcript Error: {e}"
+    return safe_openai_call(prompt)
 
 # Fetch logic
 if submit:
@@ -114,10 +112,18 @@ if submit:
                 openai.api_key = openai_key
             playlist_id = get_upload_playlist(youtube, channel_id)
 
+            # Determine range
+            range_map = {
+                "1–50": (0, 50), "51–100": (50, 100), "101–150": (100, 150),
+                "151–200": (150, 200), "201–250": (200, 250), "251–300": (250, 300),
+                "301–350": (300, 350), "351–400": (350, 400), "401–450": (400, 450), "451–500": (450, 500)
+            }
+            start, end = range_map[total_to_fetch]
+
             with st.spinner("📡 Fetching videos..."):
-                video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
+                video_meta = get_video_ids(youtube, playlist_id, max_videos=end)
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
-                selected_batch = video_meta_sorted[start_index:start_index + num_videos]
+                selected_batch = video_meta_sorted[start:end]
 
                 video_details = []
                 for v in selected_batch:
@@ -126,12 +132,12 @@ if submit:
                         info["seo_output"] = generate_seo_tags(info)
                         time.sleep(5)
                     if enable_transcript and openai_key:
-                        info["transcript"] = generate_transcript(info["url"])
+                        info["transcript"] = generate_transcript(info)
                         time.sleep(5)
                     video_details.append(info)
 
                 df = pd.DataFrame(video_details)
-                st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
+                st.write(f"📄 Showing videos {start+1} to {end}")
                 st.dataframe(df)
 
                 # Excel download
@@ -141,9 +147,9 @@ if submit:
                 output.seek(0)
 
                 st.download_button(
-                    label=f"⬇️ Download Excel for videos {start_index + 1} to {start_index + num_videos}",
+                    label=f"⬇️ Download Excel for {total_to_fetch}",
                     data=output,
-                    file_name=f"youtube_videos_{start_index + 1}_{start_index + num_videos}.xlsx",
+                    file_name=f"youtube_videos_{start+1}_{end}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
