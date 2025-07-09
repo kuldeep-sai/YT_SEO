@@ -2,20 +2,21 @@ import streamlit as st
 from googleapiclient.discovery import build
 import pandas as pd
 from io import BytesIO
-from openai import OpenAI
+import openai
 
 # Page setup
-st.set_page_config(page_title="YouTube Channel Video Exporter with SEO", layout="centered")
+st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
 st.title("📊 YouTube Channel Video Exporter + SEO Generator")
 
-st.markdown("Export videos from your YouTube channel in defined **ranges of 50** (e.g. 1–50, 51–100) and generate SEO-optimized titles, descriptions, and keywords using ChatGPT.")
+st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100). Optionally generate SEO-optimized titles, descriptions, and keywords using OpenAI.")
 
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-    openai_key = st.text_input("🤖 OpenAI API Key (Optional - for SEO generation)", type="password")
+    openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
     total_to_fetch = st.selectbox("🎯 Select batch to fetch", options=["1–50", "51–100", "101–150", "151–200", "201–250", "251–300", "301–350", "351–400", "401–450", "451–500"])
+    enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     submit = st.form_submit_button("📥 Fetch Videos")
 
 # Helper functions
@@ -56,7 +57,7 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-def generate_seo_tags(video, openai):
+def generate_seo_tags(video):
     prompt = f"""
     Analyze the following YouTube video metadata:
 
@@ -72,7 +73,7 @@ def generate_seo_tags(video, openai):
     - A comma-separated list of SEO keywords
     """
     try:
-        response = openai.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7
@@ -84,11 +85,12 @@ def generate_seo_tags(video, openai):
 # Fetch logic
 if submit:
     if not yt_api_key or not channel_id:
-        st.error("❌ Please enter both YouTube API Key and Channel ID.")
+        st.error("❌ Please enter both API Key and Channel ID.")
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
-            openai = OpenAI(api_key=openai_key) if openai_key else None
+            if enable_seo and openai_key:
+                openai.api_key = openai_key
             playlist_id = get_upload_playlist(youtube, channel_id)
 
             # Determine range
@@ -114,9 +116,9 @@ if submit:
                 video_details = []
                 for v in selected_batch:
                     info = get_video_info(youtube, v["video_id"])
-                    if openai:
-                        seo = generate_seo_tags(info, openai)
-                        info["SEO Suggestions"] = seo
+                    if enable_seo and openai_key:
+                        seo_output = generate_seo_tags(info)
+                        info["seo_output"] = seo_output
                     video_details.append(info)
 
                 df = pd.DataFrame(video_details)
@@ -132,7 +134,7 @@ if submit:
                 st.download_button(
                     label=f"⬇️ Download Excel for {total_to_fetch}",
                     data=output,
-                    file_name=f"youtube_videos_{start+1}_{end}_seo.xlsx",
+                    file_name=f"youtube_videos_{start+1}_{end}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
