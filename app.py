@@ -5,12 +5,16 @@ from googleapiclient.discovery import build
 st.set_page_config(page_title="YouTube Channel Video Info", layout="centered")
 st.title("📺 YouTube Channel Video Info Viewer")
 
-# Inputs
-yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_x5XG1OV2P6uZZ5FSM9Ttw)")
-num_videos = st.slider("🎬 Number of recent videos to fetch", 1, 10, 3)
+st.markdown("Enter your credentials and YouTube Channel ID to fetch recent videos.")
 
-# Get Upload Playlist ID
+# Inputs
+with st.form(key="form"):
+    yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+    channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_x5XG1OV2P6uZZ5FSM9Ttw)")
+    num_videos = st.slider("🎬 Number of recent videos to fetch", 1, 10, 3)
+    submit = st.form_submit_button("🔍 Fetch Video Info")
+
+# YouTube API functions
 def get_upload_playlist(youtube, channel_id):
     data = youtube.channels().list(
         part="contentDetails",
@@ -18,7 +22,6 @@ def get_upload_playlist(youtube, channel_id):
     ).execute()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-# Get video IDs from uploads playlist
 def get_video_ids(youtube, playlist_id, max_videos):
     videos = []
     next_token = None
@@ -36,7 +39,6 @@ def get_video_ids(youtube, playlist_id, max_videos):
             break
     return videos
 
-# Get video metadata
 def get_video_info(youtube, video_id):
     res = youtube.videos().list(
         part="snippet,statistics",
@@ -50,12 +52,12 @@ def get_video_info(youtube, video_id):
         "views": item["statistics"].get("viewCount", "0")
     }
 
-# Button
-if st.button("🔍 Fetch Video Info"):
+# On form submission
+if submit:
     if not yt_api_key or not channel_id:
         st.error("Please provide both API key and channel ID.")
     else:
-        with st.spinner("Fetching data from YouTube..."):
+        with st.spinner("📡 Fetching data from YouTube..."):
             try:
                 youtube = build("youtube", "v3", developerKey=yt_api_key)
                 playlist_id = get_upload_playlist(youtube, channel_id)
