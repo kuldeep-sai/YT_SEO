@@ -113,13 +113,14 @@ if submit:
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
                 selected_batch = video_meta_sorted[start:end]
 
-                video_details = []
-                for v in selected_batch:
-                    info = get_video_info(youtube, v["video_id"])
-                    if enable_seo and openai_key:
-                        seo_output = generate_seo_tags(info)
-                        info["seo_output"] = seo_output
-                    video_details.append(info)
+                # inside the loop
+for v in selected_batch:
+    info = get_video_info(youtube, v["video_id"])
+    if enable_seo and openai_key:
+        seo_output = generate_seo_tags(info)
+        info["seo_output"] = seo_output
+        time.sleep(1.5)  # delay to reduce risk of hitting rate limits
+    video_details.append(info)
 
                 df = pd.DataFrame(video_details)
                 st.write(f"📄 Showing videos {start+1} to {end}")
