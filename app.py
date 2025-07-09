@@ -73,7 +73,7 @@ def generate_seo_tags(video):
     - A comma-separated list of SEO keywords
     """
     try:
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7
