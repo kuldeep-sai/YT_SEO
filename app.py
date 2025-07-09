@@ -5,15 +5,17 @@ from io import BytesIO
 from datetime import datetime
 from collections import defaultdict
 
-st.set_page_config(page_title="YouTube Monthly Video Exporter", layout="centered")
-st.title("📅 YouTube Video Exporter (By Month)")
+# Streamlit app config
+st.set_page_config(page_title="YouTube Video Exporter", layout="centered")
+st.title("📅 YouTube Monthly Video Exporter")
 
-st.markdown("Export YouTube videos published in a specific month to Excel.")
+st.markdown("Export all videos published in a selected month from a YouTube channel as an Excel file.")
 
-# 🔐 Input
+# ---- Inputs ----
 yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-channel_id = st.text_input("📡 YouTube Channel ID")
+channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx)")
 
+# ---- Functions ----
 def get_upload_playlist(youtube, channel_id):
     res = youtube.channels().list(part="contentDetails", id=channel_id).execute()
     return res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
@@ -39,6 +41,14 @@ def get_video_ids_with_dates(youtube, playlist_id, max_videos=100):
             break
     return videos
 
+def get_available_months(videos):
+    month_map = defaultdict(list)
+    for v in videos:
+        dt = datetime.fromisoformat(v["published_at"].replace("Z", "+00:00"))
+        key = dt.strftime("%Y-%m")
+        month_map[key].append(v["video_id"])
+    return dict(sorted(month_map.items(), reverse=True))
+
 def get_video_info(youtube, video_id):
     res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
     item = res["items"][0]
@@ -52,19 +62,11 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-def get_available_months(videos):
-    month_map = defaultdict(list)
-    for v in videos:
-        dt = datetime.fromisoformat(v["published_at"].replace("Z", "+00:00"))
-        key = dt.strftime("%Y-%m")
-        month_map[key].append(v["video_id"])
-    return month_map
-
-# ✨ Step 1: Detect available months
+# ---- Main Logic ----
 if yt_api_key and channel_id:
     try:
         youtube = build("youtube", "v3", developerKey=yt_api_key)
-        with st.spinner("🔎 Fetching uploaded videos..."):
+        with st.spinner("🔍 Fetching uploaded videos..."):
             playlist_id = get_upload_playlist(youtube, channel_id)
             video_meta = get_video_ids_with_dates(youtube, playlist_id, max_videos=100)
             month_map = get_available_months(video_meta)
@@ -72,32 +74,29 @@ if yt_api_key and channel_id:
         if not month_map:
             st.warning("⚠️ No videos found.")
         else:
-            sorted_months = sorted(month_map.keys(), reverse=True)
-            selected_month = st.selectbox("📅 Select Month to Export", sorted_months)
+            selected_month = st.selectbox("📅 Select Month", list(month_map.keys()))
 
-            # ✅ Fetch button inside a form
-            with st.form("fetch_form"):
-                st.form_submit_button("📥 Download Excel for Selected Month")
+            if st.button("📥 Export to Excel"):
+                selected_ids = month_map[selected_month]
+                with st.spinner(f"Fetching details for {len(selected_ids)} videos..."):
+                    video_data = [get_video_info(youtube, vid) for vid in selected_ids]
+                    df = pd.DataFrame(video_data)
 
-                if selected_month:
-                    selected_ids = month_map[selected_month]
-                    with st.spinner(f"📦 Fetching {len(selected_ids)} videos..."):
-                        videos_data = [get_video_info(youtube, vid) for vid in selected_ids]
-                        df = pd.DataFrame(videos_data)
+                    # Create Excel file in memory
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df.to_excel(writer, index=False, sheet_name="YouTube Videos")
+                    output.seek(0)
 
-                        output = BytesIO()
-                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                            df.to_excel(writer, index=False, sheet_name="YouTube Videos")
-                        output.seek(0)
+                    st.success(f"✅ Found {len(df)} videos in {selected_month}")
+                    st.dataframe(df)
 
-                        st.success(f"✅ Found {len(df)} videos in {selected_month}")
-                        st.dataframe(df.head())
+                    st.download_button(
+                        label="⬇️ Download Excel",
+                        data=output,
+                        file_name=f"youtube_videos_{selected_month}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
-                        st.download_button(
-                            label="⬇️ Download Excel",
-                            data=output,
-                            file_name=f"youtube_{selected_month}_videos.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
