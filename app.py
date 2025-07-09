@@ -2,18 +2,21 @@ import streamlit as st
 from googleapiclient.discovery import build
 import pandas as pd
 from io import BytesIO
+import openai
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
-st.title("📊 YouTube Channel Video Exporter")
+st.title("📊 YouTube Channel Video Exporter + SEO Generator")
 
-st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100).")
+st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100). Optionally generate SEO-optimized titles, descriptions, and keywords using OpenAI.")
 
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+    openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
     total_to_fetch = st.selectbox("🎯 Select batch to fetch", options=["1–50", "51–100", "101–150", "151–200", "201–250", "251–300", "301–350", "351–400", "401–450", "451–500"])
+    enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     submit = st.form_submit_button("📥 Fetch Videos")
 
 # Helper functions
@@ -54,6 +57,31 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
+def generate_seo_tags(video):
+    prompt = f"""
+    Analyze the following YouTube video metadata:
+
+    Title: {video['title']}
+    Description: {video['description']}
+    Tags: {video['tags']}
+    Views: {video['views']}
+
+    Generate:
+    - An SEO-optimized title
+    - A 150-word keyword-rich video description
+    - A list of 10 SEO-relevant hashtags
+    - A comma-separated list of SEO keywords
+    """
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"OpenAI Error: {e}"
+
 # Fetch logic
 if submit:
     if not yt_api_key or not channel_id:
@@ -61,6 +89,8 @@ if submit:
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
+            if enable_seo and openai_key:
+                openai.api_key = openai_key
             playlist_id = get_upload_playlist(youtube, channel_id)
 
             # Determine range
@@ -83,7 +113,13 @@ if submit:
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
                 selected_batch = video_meta_sorted[start:end]
 
-                video_details = [get_video_info(youtube, v["video_id"]) for v in selected_batch]
+                video_details = []
+                for v in selected_batch:
+                    info = get_video_info(youtube, v["video_id"])
+                    if enable_seo and openai_key:
+                        seo_output = generate_seo_tags(info)
+                        info["seo_output"] = seo_output
+                    video_details.append(info)
 
                 df = pd.DataFrame(video_details)
                 st.write(f"📄 Showing videos {start+1} to {end}")
