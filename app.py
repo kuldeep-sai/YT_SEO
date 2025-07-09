@@ -2,19 +2,22 @@ import streamlit as st
 from googleapiclient.discovery import build
 import pandas as pd
 from io import BytesIO
+from openai import OpenAI
+import os
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
-st.title("📊 YouTube Channel Video Exporter")
+st.title("📊 YouTube Channel Video Exporter with SEO Tags")
 
-st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100).")
+st.markdown("Export videos from your YouTube channel in defined **ranges of 50** videos (e.g. 1–50, 51–100), including SEO-optimized metadata using OpenAI.")
 
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+    openai_api_key = st.text_input("🤖 OpenAI API Key", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
     total_to_fetch = st.selectbox("🎯 Select batch to fetch", options=["1–50", "51–100", "101–150", "151–200", "201–250", "251–300", "301–350", "351–400", "401–450", "451–500"])
-    submit = st.form_submit_button("📅 Fetch Videos")
+    submit = st.form_submit_button("📥 Fetch Videos")
 
 # Helper functions
 def get_upload_playlist(youtube, channel_id):
@@ -54,13 +57,35 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
+def generate_seo_tags(openai, video):
+    prompt = f"""
+    Analyze this video:
+    Title: {video['title']}
+    Description: {video['description']}
+    Tags: {video['tags']}
+    Views: {video['views']}
+
+    Generate:
+    1. SEO-optimized title
+    2. 150-word keyword-rich description
+    3. 10 relevant hashtags
+    4. List of SEO keywords
+    """
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7
+    )
+    return response.choices[0].message.content
+
 # Fetch logic
 if submit:
-    if not yt_api_key or not channel_id:
-        st.error("❌ Please enter both API Key and Channel ID.")
+    if not yt_api_key or not channel_id or not openai_api_key:
+        st.error("❌ Please enter all required fields: API Key, Channel ID, and OpenAI Key.")
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
+            openai = OpenAI(api_key=openai_api_key)
             playlist_id = get_upload_playlist(youtube, channel_id)
 
             # Determine range
@@ -78,15 +103,20 @@ if submit:
             }
             start, end = range_map[total_to_fetch]
 
-            with st.spinner("📱 Fetching videos..."):
+            with st.spinner("📡 Fetching videos..."):
                 video_meta = get_video_ids(youtube, playlist_id, max_videos=end)
                 video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
                 selected_batch = video_meta_sorted[start:end]
 
-                video_details = [get_video_info(youtube, v["video_id"]) for v in selected_batch]
+                video_details = []
+                for v in selected_batch:
+                    info = get_video_info(youtube, v["video_id"])
+                    seo = generate_seo_tags(openai, info)
+                    info["SEO Output"] = seo
+                    video_details.append(info)
 
                 df = pd.DataFrame(video_details)
-                st.write(f"📄 Showing videos {start+1} to {end}")
+                st.write(f"📄 Showing videos {start+1} to {end} with SEO")
                 st.dataframe(df)
 
                 # Excel download
@@ -96,9 +126,9 @@ if submit:
                 output.seek(0)
 
                 st.download_button(
-                    label=f"⬇️ Download Excel for {total_to_fetch}",
+                    label=f"⬇️ Download Excel for {total_to_fetch} (with SEO)",
                     data=output,
-                    file_name=f"youtube_videos_{start+1}_{end}.xlsx",
+                    file_name=f"youtube_videos_{start+1}_{end}_seo.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
