@@ -159,3 +159,32 @@ if st.session_state.credentials:
                 st.error(f"❌ Failed to update title: {e}")
         else:
             st.warning("⚠️ Please fill both fields above to test the update.")
+
+
+from google_auth_oauthlib.flow import Flow
+import os
+import streamlit as st
+
+# Use secrets from .streamlit/secrets.toml
+client_id = st.secrets["google_oauth"]["client_id"]
+client_secret = st.secrets["google_oauth"]["client_secret"]
+redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+
+flow = Flow.from_client_config(
+    {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": [redirect_uri],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token"
+        }
+    },
+    scopes=["https://www.googleapis.com/auth/youtube.force-ssl"],
+    redirect_uri=redirect_uri
+)
+
+auth_url, state = flow.authorization_url(prompt='consent', access_type='offline', include_granted_scopes='true')
+
+st.write("Click below to authorize the app to update YouTube metadata:")
+st.markdown(f"[🔐 Authorize with Google]({auth_url})")
