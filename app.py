@@ -125,3 +125,37 @@ if st.session_state.credentials:
 
         except HttpError as e:
             st.error(f"API Error: {e}")
+
+# ... [keep your existing imports and code above unchanged]
+
+        except HttpError as e:
+            st.error(f"API Error: {e}")
+
+    # 🔧 SEO Test Update Block (append after the try/except)
+    st.markdown("---")
+    st.subheader("🧪 Test SEO Title Update via OAuth")
+
+    test_video_id = st.text_input("🎯 Enter a Video ID to test title update")
+    test_new_title = st.text_input("📝 New Title to Set", value="Updated SEO Title via Streamlit")
+
+    if st.button("🚀 Update Title Now"):
+        if test_video_id and test_new_title:
+            try:
+                def update_video_title(youtube, video_id, new_title):
+                    return youtube.videos().update(
+                        part="snippet",
+                        body={
+                            "id": video_id,
+                            "snippet": {
+                                "title": new_title,
+                                "categoryId": "22"
+                            }
+                        }
+                    ).execute()
+
+                result = update_video_title(youtube, test_video_id, test_new_title)
+                st.success(f"✅ Title updated to: {result['snippet']['title']}")
+            except Exception as e:
+                st.error(f"❌ Failed to update title: {e}")
+        else:
+            st.warning("⚠️ Please fill both fields above to test the update.")
