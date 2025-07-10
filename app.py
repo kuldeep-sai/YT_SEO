@@ -1,137 +1,138 @@
 import streamlit as st
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.errors import HttpError
 import pandas as pd
 from io import BytesIO
-import os
-import pickle
+import openai
 import time
+from googleapiclient.errors import HttpError
 
 # Page setup
-st.set_page_config(page_title="YouTube SEO Editor", layout="centered")
-st.title("📊 YouTube SEO Manager with OAuth")
+st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
+st.title("📊 YouTube Channel Video Exporter + SEO Generator")
 
-# Load OAuth credentials from secrets
-oauth_client_id = st.secrets["google_oauth"]["client_id"]
-oauth_client_secret = st.secrets["google_oauth"]["client_secret"]
-redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+st.markdown("Export videos from your YouTube channel in defined batches. Optionally generate SEO-optimized titles, descriptions, and keywords using OpenAI.")
 
-# Define scopes for YouTube Data API (read & write access)
-SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
+# Input form
+with st.form(key="form"):
+    yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+    openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+    channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
+    start_index = st.number_input("📍 Start from video #", min_value=0, value=0, step=1)
+    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
+    enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
+    submit = st.form_submit_button("📥 Fetch Videos")
 
-# Session state
-if "credentials" not in st.session_state:
-    st.session_state.credentials = None
+# Helper functions
+def get_upload_playlist(youtube, channel_id):
+    data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
+    return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-# OAuth 2.0 Authentication
-if not st.session_state.credentials:
-    auth_url_params = {
-        "client_id": oauth_client_id,
-        "redirect_uri": redirect_uri,
-        "scope": SCOPES,
-        "access_type": "offline",
-        "include_granted_scopes": "true",
-        "response_type": "code",
-        "prompt": "consent"
+def get_video_ids(youtube, playlist_id, max_videos=100):
+    videos = []
+    next_token = None
+    while len(videos) < max_videos:
+        res = youtube.playlistItems().list(
+            part="contentDetails,snippet",
+            playlistId=playlist_id,
+            maxResults=min(50, max_videos - len(videos)),
+            pageToken=next_token
+        ).execute()
+        for item in res["items"]:
+            videos.append({
+                "video_id": item["contentDetails"]["videoId"],
+                "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
+            })
+        next_token = res.get("nextPageToken")
+        if not next_token:
+            break
+    return videos
+
+def get_video_info(youtube, video_id):
+    res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
+    item = res["items"][0]
+    return {
+        "video_id": video_id,
+        "title": item["snippet"]["title"],
+        "description": item["snippet"]["description"],
+        "tags": ", ".join(item["snippet"].get("tags", [])),
+        "views": item["statistics"].get("viewCount", "0"),
+        "published_date": item["snippet"]["publishedAt"],
+        "url": f"https://www.youtube.com/watch?v={video_id}"
     }
-    auth_url = "https://accounts.google.com/o/oauth2/auth?" + "&".join(
-        [f"{k}={v}" for k, v in auth_url_params.items()]
-    )
-    st.markdown(f"🔐 [Click here to authorize with Google]({auth_url})")
 
-    # Get authorization code from user
-    auth_code = st.text_input("Paste the authorization code here:")
-    if st.button("🔓 Authenticate") and auth_code:
-        flow = Flow.from_client_config(
-            {
-                "installed": {
-                    "client_id": oauth_client_id,
-                    "client_secret": oauth_client_secret,
-                    "redirect_uris": [redirect_uri],
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token"
-                }
-            },
-            scopes=SCOPES,
-            redirect_uri=redirect_uri
+def generate_seo_tags(video):
+    prompt = f"""
+    Analyze the following YouTube video metadata:
+
+    Title: {video['title']}
+    Description: {video['description']}
+    Tags: {video['tags']}
+    Views: {video['views']}
+
+    Generate:
+    - An SEO-optimized title
+    - A 150-word keyword-rich video description
+    - A list of 10 SEO-relevant hashtags
+    - A comma-separated list of SEO keywords
+    """
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
         )
-        flow.fetch_token(code=auth_code)
-        st.session_state.credentials = flow.credentials
-        st.success("✅ Authenticated successfully!")
+        return response.choices[0].message.content
+    except openai.RateLimitError:
+        return "⚠️ Rate limit exceeded. Please try again later."
+    except Exception as e:
+        return f"OpenAI Error: {e}"
 
-# Proceed if authenticated
-if st.session_state.credentials:
-    youtube = build("youtube", "v3", credentials=st.session_state.credentials)
-
-    st.subheader("📺 Edit SEO Metadata of Your Videos")
-
-    with st.form("edit_form"):
-        channel_id = st.text_input("Enter your YouTube Channel ID")
-        max_videos = st.slider("Number of videos to fetch", 1, 50, 10)
-        submit = st.form_submit_button("Fetch & Edit Videos")
-
-    def get_upload_playlist_id(channel_id):
-        res = youtube.channels().list(part="contentDetails", id=channel_id).execute()
-        return res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
-
-    def get_video_ids(playlist_id, max_videos):
-        vids = []
-        token = None
-        while len(vids) < max_videos:
-            pl = youtube.playlistItems().list(
-                part="contentDetails",
-                playlistId=playlist_id,
-                maxResults=min(50, max_videos - len(vids)),
-                pageToken=token
-            ).execute()
-            vids.extend([item["contentDetails"]["videoId"] for item in pl["items"]])
-            token = pl.get("nextPageToken")
-            if not token:
-                break
-        return vids
-
-    def get_video_metadata(video_id):
-        res = youtube.videos().list(part="snippet", id=video_id).execute()
-        return res["items"][0]["snippet"]
-
-    def update_video(video_id, title, desc, tags):
-        body = {
-            "id": video_id,
-            "snippet": {
-                "title": title,
-                "description": desc,
-                "tags": tags,
-                "categoryId": "22"
-            }
-        }
-        return youtube.videos().update(part="snippet", body=body).execute()
-
-    if submit:
+# Fetch logic
+if submit:
+    if not yt_api_key or not channel_id:
+        st.error("❌ Please enter both API Key and Channel ID.")
+    else:
         try:
-            playlist_id = get_upload_playlist_id(channel_id)
-            video_ids = get_video_ids(playlist_id, max_videos)
+            youtube = build("youtube", "v3", developerKey=yt_api_key)
+            if enable_seo and openai_key:
+                openai.api_key = openai_key
+            playlist_id = get_upload_playlist(youtube, channel_id)
 
-            st.success(f"Fetched {len(video_ids)} videos.")
-            for video_id in video_ids:
-                meta = get_video_metadata(video_id)
-                with st.expander(f"📹 {meta['title']}"):
-                    new_title = st.text_input(f"✏️ Title ({video_id})", meta['title'], key=video_id+"_title")
-                    new_desc = st.text_area(f"📝 Description ({video_id})", meta['description'], key=video_id+"_desc")
-                    new_tags = st.text_input(f"🏷️ Tags (comma-separated)", ", ".join(meta.get('tags', [])), key=video_id+"_tags")
-                    if st.button(f"✅ Update Video {video_id}"):
-                        update_video(video_id, new_title, new_desc, [t.strip() for t in new_tags.split(",")])
-                        st.success("Updated successfully!")
+            with st.spinner("📡 Fetching videos..."):
+                video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
+                video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
+                selected_batch = video_meta_sorted[start_index:start_index + num_videos]
+
+                video_details = []
+                for v in selected_batch:
+                    info = get_video_info(youtube, v["video_id"])
+                    if enable_seo and openai_key:
+                        seo_output = generate_seo_tags(info)
+                        info["seo_output"] = seo_output
+                        time.sleep(5)  # delay to avoid OpenAI rate limits
+                    video_details.append(info)
+
+                df = pd.DataFrame(video_details)
+                st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
+                st.dataframe(df)
+
+                # Excel download
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False, sheet_name="Videos")
+                output.seek(0)
+
+                st.download_button(
+                    label=f"⬇️ Download Excel for videos {start_index + 1} to {start_index + num_videos}",
+                    data=output,
+                    file_name=f"youtube_videos_{start_index + 1}_{start_index + num_videos}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
         except HttpError as e:
             st.error(f"API Error: {e}")
 
-# ... [keep your existing imports and code above unchanged]
-
-        except HttpError as e:
-            st.error(f"API Error: {e}")
-
-    # 🔧 SEO Test Update Block (append after the try/except)
+    # 🔧 SEO Test Update Block
     st.markdown("---")
     st.subheader("🧪 Test SEO Title Update via OAuth")
 
@@ -141,14 +142,14 @@ if st.session_state.credentials:
     if st.button("🚀 Update Title Now"):
         if test_video_id and test_new_title:
             try:
-                def update_video_title(youtube, video_id, new_title):
-                    return youtube.videos().update(
+                def update_video_title(youtube_service, video_id, new_title):
+                    return youtube_service.videos().update(
                         part="snippet",
                         body={
                             "id": video_id,
                             "snippet": {
                                 "title": new_title,
-                                "categoryId": "22"
+                                "categoryId": "22"  # Use actual category ID if known
                             }
                         }
                     ).execute()
@@ -159,32 +160,3 @@ if st.session_state.credentials:
                 st.error(f"❌ Failed to update title: {e}")
         else:
             st.warning("⚠️ Please fill both fields above to test the update.")
-
-
-from google_auth_oauthlib.flow import Flow
-import os
-import streamlit as st
-
-# Use secrets from .streamlit/secrets.toml
-client_id = st.secrets["google_oauth"]["client_id"]
-client_secret = st.secrets["google_oauth"]["client_secret"]
-redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
-
-flow = Flow.from_client_config(
-    {
-        "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uris": [redirect_uri],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token"
-        }
-    },
-    scopes=["https://www.googleapis.com/auth/youtube.force-ssl"],
-    redirect_uri=redirect_uri
-)
-
-auth_url, state = flow.authorization_url(prompt='consent', access_type='offline', include_granted_scopes='true')
-
-st.write("Click below to authorize the app to update YouTube metadata:")
-st.markdown(f"[🔐 Authorize with Google]({auth_url})")
