@@ -4,9 +4,10 @@ import pandas as pd
 from io import BytesIO
 import time
 from googleapiclient.errors import HttpError
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from openai import OpenAI
 import os
+import subprocess
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
@@ -108,6 +109,8 @@ def fetch_transcript(video_id):
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
         full_text = " ".join([seg["text"] for seg in transcript])
         return full_text
+    except (TranscriptsDisabled, NoTranscriptFound):
+        return "Transcript not available (no captions enabled or region locked)."
     except Exception as e:
         return f"❌ Transcript not available for {video_id}: {str(e)}"
 
