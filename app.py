@@ -189,12 +189,15 @@ if submit:
                 else:
                     with st.spinner("🔍 Fetching video..."):
                         info = get_video_info(youtube, video_id_input)
-                        if enable_seo:
-                            info["seo_output"] = generate_seo_tags(info, top_tags)
-                            time.sleep(5)
-                        if enable_transcript:
-                            info["transcript"] = fetch_transcript(video_id_input)
-                        video_details.append(info)
+                        if "error" in info:
+                            st.error(f"❌ {info['error']}")
+                        else:
+                            if enable_seo:
+                                info["seo_output"] = generate_seo_tags(info, top_tags)
+                                time.sleep(5)
+                            if enable_transcript:
+                                info["transcript"] = fetch_transcript(video_id_input)
+                            video_details.append(info)
 
             elif mode == "Upload URLs":
                 if not uploaded_file:
