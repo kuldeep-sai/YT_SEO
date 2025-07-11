@@ -109,7 +109,7 @@ def fetch_transcript(video_id):
         full_text = " ".join([seg["text"] for seg in transcript])
         return full_text
     except Exception as e:
-        return f"Transcript not available: {e}"
+        return f"❌ Transcript not available for {video_id}: {str(e)}"
 
 # Fetch logic
 if submit:
@@ -140,6 +140,7 @@ if submit:
                             if enable_transcript:
                                 transcript = fetch_transcript(v["video_id"])
                                 info["transcript"] = transcript
+                                st.info(f"📝 Transcript for {v['video_id']} (first 100 chars): {transcript[:100]}")
                             video_details.append(info)
 
             else:
@@ -155,6 +156,7 @@ if submit:
                         if enable_transcript:
                             transcript = fetch_transcript(video_id_input)
                             info["transcript"] = transcript
+                            st.info(f"📝 Transcript for {video_id_input} (first 100 chars): {transcript[:100]}")
                         video_details.append(info)
 
             if video_details:
