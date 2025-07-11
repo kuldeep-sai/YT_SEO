@@ -8,9 +8,12 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from openai import OpenAI
 import os
 
-# Input OpenAI key manually if not available in environment
-manual_openai_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else ""
-client = OpenAI(api_key=manual_openai_key) if manual_openai_key else None
+# Allow user to input OpenAI API key or fall back to Streamlit secrets
+user_openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+effective_openai_key = user_openai_key or st.secrets.get("OPENAI_API_KEY", "")
+
+client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
+
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
