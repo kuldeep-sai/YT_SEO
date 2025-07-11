@@ -18,7 +18,7 @@ with st.form(key="form"):
     openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
     start_index = st.number_input("📍 Start from video #", min_value=0, value=0, step=1)
-    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
+    num_videos = st.number_input("🎬 Number of videos to fetch (max 10000)", min_value=1, max_value=10000, value=500, step=1)
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     submit = st.form_submit_button("📥 Fetch Videos")
 
@@ -27,23 +27,27 @@ def get_upload_playlist(youtube, channel_id):
     data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_video_ids(youtube, playlist_id, max_videos=100):
+def get_video_ids(youtube, playlist_id, max_videos=10000):
     videos = []
     next_token = None
     while len(videos) < max_videos:
-        res = youtube.playlistItems().list(
-            part="contentDetails,snippet",
-            playlistId=playlist_id,
-            maxResults=min(50, max_videos - len(videos)),
-            pageToken=next_token
-        ).execute()
-        for item in res["items"]:
-            videos.append({
-                "video_id": item["contentDetails"]["videoId"],
-                "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
-            })
-        next_token = res.get("nextPageToken")
-        if not next_token:
+        try:
+            res = youtube.playlistItems().list(
+                part="contentDetails,snippet",
+                playlistId=playlist_id,
+                maxResults=50,
+                pageToken=next_token
+            ).execute()
+            for item in res["items"]:
+                videos.append({
+                    "video_id": item["contentDetails"]["videoId"],
+                    "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
+                })
+            next_token = res.get("nextPageToken")
+            if not next_token:
+                break
+        except HttpError as e:
+            st.error(f"API Error during pagination: {e}")
             break
     return videos
 
@@ -109,14 +113,13 @@ if submit:
                     if enable_seo and openai_key:
                         seo_output = generate_seo_tags(info)
                         info["seo_output"] = seo_output
-                        time.sleep(5)  # delay to avoid OpenAI rate limits
+                        time.sleep(5)
                     video_details.append(info)
 
                 df = pd.DataFrame(video_details)
                 st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
                 st.dataframe(df)
 
-                # Excel download
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name="Videos")
@@ -149,7 +152,7 @@ if submit:
                             "id": video_id,
                             "snippet": {
                                 "title": new_title,
-                                "categoryId": "22"  # Use actual category ID if known
+                                "categoryId": "22"
                             }
                         }
                     ).execute()
