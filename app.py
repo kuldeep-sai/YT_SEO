@@ -12,21 +12,27 @@ import os
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
 st.title("📊 YouTube Channel Video Exporter + SEO Generator + Transcript")
 
-st.markdown("Export videos from your YouTube channel in defined batches. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
+st.markdown("Export videos from your YouTube channel in defined batches or process a single video manually. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
+
+# Mode selection
+mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video"], horizontal=True)
 
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
     openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
-    channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
 
-    batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
-    start_index = (batch_number - 1) * 500
+    if mode == "Batch Mode":
+        channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
+        batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
+        start_index = (batch_number - 1) * 500
+        num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=500, step=1)
+    else:
+        video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
 
-    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=500, step=1)
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     enable_transcript = st.checkbox("📝 Generate Transcripts")
-    submit = st.form_submit_button("📥 Fetch Videos")
+    submit = st.form_submit_button("📥 Fetch Video(s)")
 
 # Use provided API key or fallback to secrets
 effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
@@ -107,32 +113,52 @@ def fetch_transcript(video_id):
 
 # Fetch logic
 if submit:
-    if not yt_api_key or not channel_id:
-        st.error("❌ Please enter both API Key and Channel ID.")
+    if not yt_api_key:
+        st.error("❌ Please enter your YouTube API Key.")
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
-            playlist_id = get_upload_playlist(youtube, channel_id)
 
-            with st.spinner("📡 Fetching videos..."):
-                video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
-                video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
-                selected_batch = video_meta_sorted[start_index:start_index + num_videos]
+            video_details = []
+            if mode == "Batch Mode":
+                if not channel_id:
+                    st.error("❌ Please enter Channel ID.")
+                else:
+                    playlist_id = get_upload_playlist(youtube, channel_id)
 
-                video_details = []
-                for v in selected_batch:
-                    info = get_video_info(youtube, v["video_id"])
-                    if enable_seo:
-                        seo_output = generate_seo_tags(info)
-                        info["seo_output"] = seo_output
-                        time.sleep(5)
-                    if enable_transcript:
-                        transcript = fetch_transcript(v["video_id"])
-                        info["transcript"] = transcript
-                    video_details.append(info)
+                    with st.spinner("📡 Fetching videos..."):
+                        video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
+                        video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
+                        selected_batch = video_meta_sorted[start_index:start_index + num_videos]
 
+                        for v in selected_batch:
+                            info = get_video_info(youtube, v["video_id"])
+                            if enable_seo:
+                                seo_output = generate_seo_tags(info)
+                                info["seo_output"] = seo_output
+                                time.sleep(5)
+                            if enable_transcript:
+                                transcript = fetch_transcript(v["video_id"])
+                                info["transcript"] = transcript
+                            video_details.append(info)
+
+            else:
+                if not video_id_input:
+                    st.error("❌ Please enter a Video ID.")
+                else:
+                    with st.spinner("🔍 Fetching video..."):
+                        info = get_video_info(youtube, video_id_input)
+                        if enable_seo:
+                            seo_output = generate_seo_tags(info)
+                            info["seo_output"] = seo_output
+                            time.sleep(5)
+                        if enable_transcript:
+                            transcript = fetch_transcript(video_id_input)
+                            info["transcript"] = transcript
+                        video_details.append(info)
+
+            if video_details:
                 df = pd.DataFrame(video_details)
-                st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
                 st.dataframe(df)
 
                 output = BytesIO()
@@ -141,9 +167,9 @@ if submit:
                 output.seek(0)
 
                 st.download_button(
-                    label=f"⬇️ Download Excel for videos {start_index + 1} to {start_index + num_videos}",
+                    label=f"⬇️ Download Excel",
                     data=output,
-                    file_name=f"youtube_videos_{start_index + 1}_{start_index + num_videos}.xlsx",
+                    file_name="youtube_videos.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
