@@ -8,11 +8,9 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from openai import OpenAI
 import os
 
-# Initialize OpenAI client using environment variable
-client = None
-openai_api_key = os.getenv("OPENAI_API_KEY")
-if openai_api_key:
-    client = OpenAI(api_key=openai_api_key)
+# Input OpenAI key manually if not available in environment
+manual_openai_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else ""
+client = OpenAI(api_key=manual_openai_key) if manual_openai_key else None
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
@@ -73,7 +71,7 @@ def get_video_info(youtube, video_id):
 
 def generate_seo_tags(video):
     if not client:
-        return "❌ OpenAI API key is missing or not set in environment."
+        return "❌ OpenAI API key is missing or not set in secrets."
 
     prompt = f"""
     Analyze the following YouTube video metadata:
@@ -91,7 +89,7 @@ def generate_seo_tags(video):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
