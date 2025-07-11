@@ -8,13 +8,6 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from openai import OpenAI
 import os
 
-# Allow user to input OpenAI API key or fall back to Streamlit secrets
-user_openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
-effective_openai_key = user_openai_key or st.secrets.get("OPENAI_API_KEY", "")
-
-client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
-
-
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
 st.title("📊 YouTube Channel Video Exporter + SEO Generator + Transcript")
@@ -24,6 +17,7 @@ st.markdown("Export videos from your YouTube channel in defined batches. Optiona
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+    openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
 
     batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
@@ -33,6 +27,10 @@ with st.form(key="form"):
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     enable_transcript = st.checkbox("📝 Generate Transcripts")
     submit = st.form_submit_button("📥 Fetch Videos")
+
+# Use provided API key or fallback to secrets
+effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
+client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
 
 # Helper functions
 def get_upload_playlist(youtube, channel_id):
@@ -74,7 +72,7 @@ def get_video_info(youtube, video_id):
 
 def generate_seo_tags(video):
     if not client:
-        return "❌ OpenAI API key is missing or not set in secrets."
+        return "❌ OpenAI API key is missing or not set."
 
     prompt = f"""
     Analyze the following YouTube video metadata:
