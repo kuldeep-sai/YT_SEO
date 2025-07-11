@@ -2,10 +2,16 @@ import streamlit as st
 from googleapiclient.discovery import build
 import pandas as pd
 from io import BytesIO
-import openai
 import time
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
+from openai import OpenAI
+import os
+
+# Initialize OpenAI client using environment variable
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
@@ -16,10 +22,12 @@ st.markdown("Export videos from your YouTube channel in defined batches. Optiona
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-    openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-    start_index = st.number_input("📍 Start from video #", min_value=0, value=0, step=1)
-    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
+
+    batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
+    start_index = (batch_number - 1) * 500
+
+    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=500, step=1)
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     enable_transcript = st.checkbox("📝 Generate Transcripts")
     submit = st.form_submit_button("📥 Fetch Videos")
@@ -29,7 +37,7 @@ def get_upload_playlist(youtube, channel_id):
     data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_video_ids(youtube, playlist_id, max_videos=100):
+def get_video_ids(youtube, playlist_id, max_videos=10000):
     videos = []
     next_token = None
     while len(videos) < max_videos:
@@ -78,14 +86,12 @@ def generate_seo_tags(video):
     - A comma-separated list of SEO keywords
     """
     try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            store=True,
+            messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
-    except openai.RateLimitError:
-        return "⚠️ Rate limit exceeded. Please try again later."
     except Exception as e:
         return f"OpenAI Error: {e}"
 
@@ -104,8 +110,6 @@ if submit:
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
-            if enable_seo and openai_key:
-                openai.api_key = openai_key
             playlist_id = get_upload_playlist(youtube, channel_id)
 
             with st.spinner("📡 Fetching videos..."):
@@ -116,10 +120,10 @@ if submit:
                 video_details = []
                 for v in selected_batch:
                     info = get_video_info(youtube, v["video_id"])
-                    if enable_seo and openai_key:
+                    if enable_seo:
                         seo_output = generate_seo_tags(info)
                         info["seo_output"] = seo_output
-                        time.sleep(5)  # delay to avoid OpenAI rate limits
+                        time.sleep(5)
                     if enable_transcript:
                         transcript = fetch_transcript(v["video_id"])
                         info["transcript"] = transcript
@@ -129,7 +133,6 @@ if submit:
                 st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
                 st.dataframe(df)
 
-                # Excel download
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name="Videos")
