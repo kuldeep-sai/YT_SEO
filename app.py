@@ -9,9 +9,10 @@ from openai import OpenAI
 import os
 
 # Initialize OpenAI client using environment variable
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+client = None
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if openai_api_key:
+    client = OpenAI(api_key=openai_api_key)
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
@@ -71,6 +72,9 @@ def get_video_info(youtube, video_id):
     }
 
 def generate_seo_tags(video):
+    if not client:
+        return "❌ OpenAI API key is missing or not set in environment."
+
     prompt = f"""
     Analyze the following YouTube video metadata:
 
@@ -88,7 +92,6 @@ def generate_seo_tags(video):
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            store=True,
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
