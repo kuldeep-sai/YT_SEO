@@ -22,6 +22,7 @@ mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
     openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+    seo_topic = st.text_input("📈 (Optional) Topic for analyzing top-ranking SEO tags")
 
     if mode == "Batch Mode":
         channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
@@ -81,23 +82,46 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-def generate_seo_tags(video):
+def get_top_video_tags(youtube, search_query, max_results=20):
+    try:
+        search_res = youtube.search().list(
+            q=search_query,
+            part="snippet",
+            type="video",
+            order="viewCount",
+            maxResults=max_results
+        ).execute()
+        video_ids = [item["id"]["videoId"] for item in search_res["items"]]
+        tags = []
+        for vid in video_ids:
+            res = youtube.videos().list(part="snippet", id=vid).execute()
+            if res["items"]:
+                tags.extend(res["items"][0]["snippet"].get("tags", []))
+        tag_freq = pd.Series(tags).value_counts()
+        return tag_freq.index.tolist()[:20]
+    except Exception as e:
+        return [f"Error: {str(e)}"]
+
+def generate_seo_tags(video, top_tags=None):
     if not client:
         return "❌ OpenAI API key is missing or not set."
 
+    tags_string = ", ".join(top_tags) if top_tags else ""
     prompt = f"""
-    Analyze the following YouTube video metadata:
+    You are an expert YouTube SEO optimizer. Given this video metadata:
 
     Title: {video['title']}
     Description: {video['description']}
     Tags: {video['tags']}
     Views: {video['views']}
 
+    Top trending tags: {tags_string}
+
     Generate:
-    - An SEO-optimized title
-    - A 150-word keyword-rich video description
-    - A list of 10 SEO-relevant hashtags
-    - A comma-separated list of SEO keywords
+    - A compelling SEO-optimized YouTube title (under 70 characters, with keywords early)
+    - A 150-word keyword-rich video description (2 paragraphs max)
+    - A list of 10 relevant SEO hashtags
+    - A list of 10 comma-separated long-tail keywords
     """
     try:
         response = client.chat.completions.create(
@@ -111,8 +135,7 @@ def generate_seo_tags(video):
 def fetch_transcript(video_id):
     try:
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        full_text = " ".join([seg["text"] for seg in transcript])
-        return full_text
+        return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
         return "Transcript not available (no captions enabled or region locked)."
     except Exception as e:
@@ -135,6 +158,11 @@ if submit:
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
+            top_tags = get_top_video_tags(youtube, seo_topic) if seo_topic else []
+
+            if seo_topic and top_tags:
+                st.markdown(f"🔝 Top tags used by high-performing videos for **{seo_topic}**:")
+                st.write(", ".join(top_tags))
 
             video_details = []
             if mode == "Batch Mode":
@@ -142,22 +170,18 @@ if submit:
                     st.error("❌ Please enter Channel ID.")
                 else:
                     playlist_id = get_upload_playlist(youtube, channel_id)
-
                     with st.spinner("📡 Fetching videos..."):
                         video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
                         video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
                         selected_batch = video_meta_sorted[start_index:start_index + num_videos]
-
                         for v in selected_batch:
                             info = get_video_info(youtube, v["video_id"])
                             if enable_seo:
-                                seo_output = generate_seo_tags(info)
-                                info["seo_output"] = seo_output
+                                info["seo_output"] = generate_seo_tags(info, top_tags)
                                 time.sleep(5)
                             if enable_transcript:
-                                transcript = fetch_transcript(v["video_id"])
-                                info["transcript"] = transcript
-                                st.info(f"📝 Transcript for {v['video_id']} (first 100 chars): {transcript[:100]}")
+                                info["transcript"] = fetch_transcript(v["video_id"])
+                                st.info(f"📝 Transcript for {v['video_id']} (first 100 chars): {info['transcript'][:100]}")
                             video_details.append(info)
 
             elif mode == "Single Video":
@@ -167,13 +191,11 @@ if submit:
                     with st.spinner("🔍 Fetching video..."):
                         info = get_video_info(youtube, video_id_input)
                         if enable_seo:
-                            seo_output = generate_seo_tags(info)
-                            info["seo_output"] = seo_output
+                            info["seo_output"] = generate_seo_tags(info, top_tags)
                             time.sleep(5)
                         if enable_transcript:
-                            transcript = fetch_transcript(video_id_input)
-                            info["transcript"] = transcript
-                            st.info(f"📝 Transcript for {video_id_input} (first 100 chars): {transcript[:100]}")
+                            info["transcript"] = fetch_transcript(video_id_input)
+                            st.info(f"📝 Transcript for {video_id_input} (first 100 chars): {info['transcript'][:100]}")
                         video_details.append(info)
 
             elif mode == "Upload URLs":
@@ -185,13 +207,11 @@ if submit:
                         for vid in video_ids:
                             info = get_video_info(youtube, vid)
                             if enable_seo:
-                                seo_output = generate_seo_tags(info)
-                                info["seo_output"] = seo_output
+                                info["seo_output"] = generate_seo_tags(info, top_tags)
                                 time.sleep(5)
                             if enable_transcript:
-                                transcript = fetch_transcript(vid)
-                                info["transcript"] = transcript
-                                st.info(f"📝 Transcript for {vid} (first 100 chars): {transcript[:100]}")
+                                info["transcript"] = fetch_transcript(vid)
+                                st.info(f"📝 Transcript for {vid} (first 100 chars): {info['transcript'][:100]}")
                             video_details.append(info)
 
             if video_details:
