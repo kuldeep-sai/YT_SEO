@@ -7,16 +7,16 @@ from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from openai import OpenAI
 import os
-import subprocess
+import re
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
 st.title("📊 YouTube Channel Video Exporter + SEO Generator + Transcript")
 
-st.markdown("Export videos from your YouTube channel in defined batches or process a single video manually. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
+st.markdown("Export videos from your YouTube channel, a single video, or from a list of video URLs. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
 
 # Mode selection
-mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video"], horizontal=True)
+mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
 
 # Input form
 with st.form(key="form"):
@@ -28,8 +28,10 @@ with st.form(key="form"):
         batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
         start_index = (batch_number - 1) * 500
         num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=500, step=1)
-    else:
+    elif mode == "Single Video":
         video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
+    else:
+        uploaded_file = st.file_uploader("📄 Upload CSV or TXT with YouTube Video URLs", type=["csv", "txt"])
 
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
     enable_transcript = st.checkbox("📝 Generate Transcripts")
@@ -67,15 +69,7 @@ def get_video_ids(youtube, playlist_id, max_videos=10000):
 def get_video_info(youtube, video_id):
     res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
     if not res["items"]:
-        return {
-            "video_id": video_id,
-            "title": "N/A (video not found)",
-            "description": "N/A",
-            "tags": "N/A",
-            "views": "0",
-            "published_date": "N/A",
-            "url": f"https://www.youtube.com/watch?v={video_id}"
-        }
+        return {"video_id": video_id, "error": "Video not found or unavailable"}
     item = res["items"][0]
     return {
         "video_id": video_id,
@@ -124,6 +118,16 @@ def fetch_transcript(video_id):
     except Exception as e:
         return f"❌ Transcript not available for {video_id}: {str(e)}"
 
+def extract_video_ids_from_urls(file):
+    content = file.read().decode("utf-8")
+    urls = content.splitlines()
+    ids = []
+    for url in urls:
+        match = re.search(r"(?:v=|youtu.be/)([\w-]{11})", url)
+        if match:
+            ids.append(match.group(1))
+    return ids
+
 # Fetch logic
 if submit:
     if not yt_api_key:
@@ -156,7 +160,7 @@ if submit:
                                 st.info(f"📝 Transcript for {v['video_id']} (first 100 chars): {transcript[:100]}")
                             video_details.append(info)
 
-            else:
+            elif mode == "Single Video":
                 if not video_id_input:
                     st.error("❌ Please enter a Video ID.")
                 else:
@@ -171,6 +175,24 @@ if submit:
                             info["transcript"] = transcript
                             st.info(f"📝 Transcript for {video_id_input} (first 100 chars): {transcript[:100]}")
                         video_details.append(info)
+
+            elif mode == "Upload URLs":
+                if not uploaded_file:
+                    st.error("❌ Please upload a file with video URLs.")
+                else:
+                    video_ids = extract_video_ids_from_urls(uploaded_file)
+                    with st.spinner("📄 Processing uploaded video URLs..."):
+                        for vid in video_ids:
+                            info = get_video_info(youtube, vid)
+                            if enable_seo:
+                                seo_output = generate_seo_tags(info)
+                                info["seo_output"] = seo_output
+                                time.sleep(5)
+                            if enable_transcript:
+                                transcript = fetch_transcript(vid)
+                                info["transcript"] = transcript
+                                st.info(f"📝 Transcript for {vid} (first 100 chars): {transcript[:100]}")
+                            video_details.append(info)
 
             if video_details:
                 df = pd.DataFrame(video_details)
