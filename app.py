@@ -66,6 +66,16 @@ def get_video_ids(youtube, playlist_id, max_videos=10000):
 
 def get_video_info(youtube, video_id):
     res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
+    if not res["items"]:
+        return {
+            "video_id": video_id,
+            "title": "N/A (video not found)",
+            "description": "N/A",
+            "tags": "N/A",
+            "views": "0",
+            "published_date": "N/A",
+            "url": f"https://www.youtube.com/watch?v={video_id}"
+        }
     item = res["items"][0]
     return {
         "video_id": video_id,
