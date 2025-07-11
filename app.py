@@ -5,12 +5,13 @@ from io import BytesIO
 import openai
 import time
 from googleapiclient.errors import HttpError
+from youtube_transcript_api import YouTubeTranscriptApi
 
 # Page setup
 st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
-st.title("📊 YouTube Channel Video Exporter + SEO Generator")
+st.title("📊 YouTube Channel Video Exporter + SEO Generator + Transcript")
 
-st.markdown("Export videos from your YouTube channel in defined batches. Optionally generate SEO-optimized titles, descriptions, and keywords using OpenAI.")
+st.markdown("Export videos from your YouTube channel in defined batches. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
 
 # Input form
 with st.form(key="form"):
@@ -18,8 +19,9 @@ with st.form(key="form"):
     openai_key = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
     channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
     start_index = st.number_input("📍 Start from video #", min_value=0, value=0, step=1)
-    num_videos = st.number_input("🎬 Number of videos to fetch (max 10000)", min_value=1, max_value=10000, value=500, step=1)
+    num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
     enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
+    enable_transcript = st.checkbox("📝 Generate Transcripts")
     submit = st.form_submit_button("📥 Fetch Videos")
 
 # Helper functions
@@ -27,27 +29,23 @@ def get_upload_playlist(youtube, channel_id):
     data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_video_ids(youtube, playlist_id, max_videos=10000):
+def get_video_ids(youtube, playlist_id, max_videos=100):
     videos = []
     next_token = None
     while len(videos) < max_videos:
-        try:
-            res = youtube.playlistItems().list(
-                part="contentDetails,snippet",
-                playlistId=playlist_id,
-                maxResults=50,
-                pageToken=next_token
-            ).execute()
-            for item in res["items"]:
-                videos.append({
-                    "video_id": item["contentDetails"]["videoId"],
-                    "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
-                })
-            next_token = res.get("nextPageToken")
-            if not next_token:
-                break
-        except HttpError as e:
-            st.error(f"API Error during pagination: {e}")
+        res = youtube.playlistItems().list(
+            part="contentDetails,snippet",
+            playlistId=playlist_id,
+            maxResults=min(50, max_videos - len(videos)),
+            pageToken=next_token
+        ).execute()
+        for item in res["items"]:
+            videos.append({
+                "video_id": item["contentDetails"]["videoId"],
+                "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
+            })
+        next_token = res.get("nextPageToken")
+        if not next_token:
             break
     return videos
 
@@ -91,6 +89,14 @@ def generate_seo_tags(video):
     except Exception as e:
         return f"OpenAI Error: {e}"
 
+def fetch_transcript(video_id):
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        full_text = " ".join([seg["text"] for seg in transcript])
+        return full_text
+    except Exception as e:
+        return f"Transcript not available: {e}"
+
 # Fetch logic
 if submit:
     if not yt_api_key or not channel_id:
@@ -113,13 +119,17 @@ if submit:
                     if enable_seo and openai_key:
                         seo_output = generate_seo_tags(info)
                         info["seo_output"] = seo_output
-                        time.sleep(5)
+                        time.sleep(5)  # delay to avoid OpenAI rate limits
+                    if enable_transcript:
+                        transcript = fetch_transcript(v["video_id"])
+                        info["transcript"] = transcript
                     video_details.append(info)
 
                 df = pd.DataFrame(video_details)
                 st.write(f"📄 Showing videos {start_index + 1} to {start_index + num_videos}")
                 st.dataframe(df)
 
+                # Excel download
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, sheet_name="Videos")
@@ -134,32 +144,3 @@ if submit:
 
         except HttpError as e:
             st.error(f"API Error: {e}")
-
-    # 🔧 SEO Test Update Block
-    st.markdown("---")
-    st.subheader("🧪 Test SEO Title Update via OAuth")
-
-    test_video_id = st.text_input("🎯 Enter a Video ID to test title update")
-    test_new_title = st.text_input("📝 New Title to Set", value="Updated SEO Title via Streamlit")
-
-    if st.button("🚀 Update Title Now"):
-        if test_video_id and test_new_title:
-            try:
-                def update_video_title(youtube_service, video_id, new_title):
-                    return youtube_service.videos().update(
-                        part="snippet",
-                        body={
-                            "id": video_id,
-                            "snippet": {
-                                "title": new_title,
-                                "categoryId": "22"
-                            }
-                        }
-                    ).execute()
-
-                result = update_video_title(youtube, test_video_id, test_new_title)
-                st.success(f"✅ Title updated to: {result['snippet']['title']}")
-            except Exception as e:
-                st.error(f"❌ Failed to update title: {e}")
-        else:
-            st.warning("⚠️ Please fill both fields above to test the update.")
