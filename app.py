@@ -137,9 +137,9 @@ def fetch_transcript(video_id):
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
         return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
-        return "Transcript not available (no captions enabled or region locked)."
-    except Exception as e:
-        return f"❌ Transcript not available for {video_id}: {str(e)}"
+        return "Transcript not found"
+    except Exception:
+        return "Transcript not found"
 
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
@@ -181,7 +181,6 @@ if submit:
                                 time.sleep(5)
                             if enable_transcript:
                                 info["transcript"] = fetch_transcript(v["video_id"])
-                                st.info(f"📝 Transcript for {v['video_id']} (first 100 chars): {info['transcript'][:100]}")
                             video_details.append(info)
 
             elif mode == "Single Video":
@@ -195,7 +194,6 @@ if submit:
                             time.sleep(5)
                         if enable_transcript:
                             info["transcript"] = fetch_transcript(video_id_input)
-                            st.info(f"📝 Transcript for {video_id_input} (first 100 chars): {info['transcript'][:100]}")
                         video_details.append(info)
 
             elif mode == "Upload URLs":
@@ -211,7 +209,6 @@ if submit:
                                 time.sleep(5)
                             if enable_transcript:
                                 info["transcript"] = fetch_transcript(vid)
-                                st.info(f"📝 Transcript for {vid} (first 100 chars): {info['transcript'][:100]}")
                             video_details.append(info)
 
             if video_details:
