@@ -1,5 +1,5 @@
 import streamlit as st
-from utils.instagram_handler import handle_instagram_single, handle_instagram_batch, handle_instagram_urls, get_top_instagram_hashtags
+from utils.instagram_handler import handle_instagram_single, handle_instagram_urls
 import pandas as pd
 from io import BytesIO
 
