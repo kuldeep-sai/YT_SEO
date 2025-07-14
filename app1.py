@@ -46,7 +46,11 @@ with st.form(key="form"):
 
         if mode == "Single Video":
             instagram_url_input = st.text_input("🎥 Enter Instagram Video URL")
-        elif mode == "Upload URLs" or mode == "Batch Mode":
+        elif mode == "Batch Mode":
+            st.markdown("🔗 **Enter Instagram Profile URL and Number of Posts to Fetch**")
+            instagram_profile_url = st.text_input("🔗 Instagram Profile URL")
+            max_posts = st.number_input("📄 Number of posts to fetch", min_value=1, max_value=500, value=50)
+        else:
             ig_urls_file = st.file_uploader("📄 Upload CSV or TXT with Instagram Video URLs", type=["csv", "txt"])
 
         enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
@@ -60,113 +64,29 @@ with st.form(key="form"):
 effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
 
-# Helper functions
-def get_upload_playlist(youtube, channel_id):
-    data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
-    return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+# 🚀 Processing logic
+if submit:
+    if platform == "YouTube":
+        from utils.youtube_handler import handle_youtube_batch, handle_youtube_single, handle_youtube_urls
+        youtube = build("youtube", "v3", developerKey=yt_api_key)
 
-def get_video_ids(youtube, playlist_id, max_videos=10000):
-    videos = []
-    next_token = None
-    while len(videos) < max_videos:
-        res = youtube.playlistItems().list(
-            part="contentDetails,snippet",
-            playlistId=playlist_id,
-            maxResults=min(50, max_videos - len(videos)),
-            pageToken=next_token
-        ).execute()
-        for item in res["items"]:
-            videos.append({
-                "video_id": item["contentDetails"]["videoId"],
-                "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
-            })
-        next_token = res.get("nextPageToken")
-        if not next_token:
-            break
-    return videos
+        if mode == "Batch Mode":
+            handle_youtube_batch(youtube, channel_id, start_index, num_videos, enable_seo, enable_transcript, client, seo_topic)
 
-def get_video_info(youtube, video_id):
-    res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
-    if not res["items"]:
-        return {"video_id": video_id, "error": "Video not found or unavailable"}
-    item = res["items"][0]
-    return {
-        "video_id": video_id,
-        "title": item["snippet"]["title"],
-        "description": item["snippet"]["description"],
-        "tags": ", ".join(item["snippet"].get("tags", [])),
-        "views": item["statistics"].get("viewCount", "0"),
-        "published_date": item["snippet"]["publishedAt"],
-        "url": f"https://www.youtube.com/watch?v={video_id}"
-    }
+        elif mode == "Single Video":
+            handle_youtube_single(youtube, video_id_input, enable_seo, enable_transcript, client, seo_topic)
 
-def get_top_video_tags(youtube, search_query, max_results=20):
-    try:
-        search_res = youtube.search().list(
-            q=search_query,
-            part="snippet",
-            type="video",
-            order="viewCount",
-            maxResults=max_results
-        ).execute()
-        video_ids = [item["id"]["videoId"] for item in search_res["items"]]
-        tags = []
-        for vid in video_ids:
-            res = youtube.videos().list(part="snippet", id=vid).execute()
-            if res["items"]:
-                tags.extend(res["items"][0]["snippet"].get("tags", []))
-        tag_freq = pd.Series(tags).value_counts()
-        return tag_freq.index.tolist()[:20]
-    except Exception as e:
-        return [f"Error: {str(e)}"]
+        elif mode == "Upload URLs" and uploaded_file is not None:
+            handle_youtube_urls(uploaded_file, youtube, enable_seo, enable_transcript, client, seo_topic)
 
-def generate_seo_tags(video, top_tags=None):
-    if not client:
-        return "❌ OpenAI API key is missing or not set."
+    elif platform == "Instagram":
+        from utils.instagram_handler import handle_instagram_single, handle_instagram_batch, handle_instagram_urls
 
-    tags_string = ", ".join(top_tags) if top_tags else ""
-    prompt = f"""
-    You are an expert video SEO optimizer. Given this video metadata:
+        if mode == "Single Video":
+            handle_instagram_single(instagram_url_input, enable_seo, client)
 
-    Title: {video['title']}
-    Description: {video['description']}
-    Tags: {video['tags']}
-    Views: {video.get('views', '0')}
+        elif mode == "Batch Mode":
+            handle_instagram_batch(instagram_profile_url, max_posts, enable_seo, client)
 
-    Top trending tags: {tags_string}
-
-    Generate:
-    - A compelling SEO-optimized title (under 70 characters, with keywords early)
-    - A 150-word keyword-rich video description (2 paragraphs max)
-    - A list of 10 relevant SEO hashtags
-    - A list of 10 comma-separated long-tail keywords
-    """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"OpenAI Error: {e}"
-
-def fetch_transcript(video_id):
-    try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        return " ".join([seg["text"] for seg in transcript])
-    except (TranscriptsDisabled, NoTranscriptFound):
-        return "Transcript not found"
-    except Exception:
-        return "Transcript not found"
-
-def extract_video_ids_from_urls(file):
-    content = file.read().decode("utf-8")
-    urls = content.splitlines()
-    ids = []
-    for url in urls:
-        match = re.search(r"(?:v=|youtu.be/)([\w-]{11})", url)
-        if match:
-            ids.append(match.group(1))
-    return ids
-
-# Fetch logic continues as in previous implementation...
+        elif mode == "Upload URLs" and ig_urls_file is not None:
+            handle_instagram_urls(ig_urls_file, enable_seo, client)
