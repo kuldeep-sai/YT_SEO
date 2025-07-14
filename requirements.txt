@@ -1,7 +1,19 @@
+# Core dependencies
 streamlit
 pandas
+openai
+xlsxwriter
+requests
+
+# YouTube APIs
 google-api-python-client
 google-auth
 google-auth-oauthlib
-openai
-youtube-transcript-api
+youtube_transcript_api
+
+# Instagram (via scraping or public data)
+beautifulsoup4
+lxml
+
+# Other utilities
+tqdm
