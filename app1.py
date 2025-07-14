@@ -83,25 +83,24 @@ elif app == "Instagram":
     ig_mode = st.radio("Select Mode", ["Single Video", "Batch (CSV/TXT)", "About"], horizontal=True)
     ig_api_key = st.text_input("📷 Instagram API Key (optional)", type="password")
 
+    url = st.text_input("Paste Instagram Post URL:") if ig_mode == "Single Video" else None
+    file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs") if ig_mode == "Batch (CSV/TXT)" else None
+
+    enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
+
     top_tags = get_top_instagram_hashtags(seo_topic) if seo_topic else []
     if seo_topic and top_tags:
         st.markdown(f"🔝 **Top Instagram hashtags for {seo_topic}:**")
         st.write(", ".join(top_tags))
 
     results = []
-    if ig_mode == "Single Video":
-        url = st.text_input("Paste Instagram Post URL:")
-        enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
-        if st.button("📥 Fetch Post"):
-            results = handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key)
+    if ig_mode == "Single Video" and url and st.button("📥 Fetch Post"):
+        results = handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key)
 
-    elif ig_mode == "Batch (CSV/TXT)":
-        file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs")
-        enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
-        if file and st.button("📥 Process File"):
-            results = handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key)
+    elif ig_mode == "Batch (CSV/TXT)" and file and st.button("📥 Process File"):
+        results = handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key)
 
-    else:
+    elif ig_mode == "About":
         st.markdown("""
             This tool extracts Instagram post info and generates SEO content using ChatGPT.
 
