@@ -90,12 +90,16 @@ elif app == "Instagram":
 
     results = []
     if ig_mode == "Single Video":
-        handle_instagram_single("", True, client, openai_key, top_tags, ig_api_key)
+        url = st.text_input("Paste Instagram Post URL:")
+        enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
+        if st.button("📥 Fetch Post"):
+            results = handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key)
 
     elif ig_mode == "Batch (CSV/TXT)":
         file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs")
-        if file:
-            handle_instagram_urls(file, True, client, openai_key, top_tags, ig_api_key)
+        enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
+        if file and st.button("📥 Process File"):
+            results = handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key)
 
     else:
         st.markdown("""
