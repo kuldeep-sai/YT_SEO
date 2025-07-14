@@ -52,12 +52,17 @@ def generate_seo_from_instagram(post, client, openai_key, top_tags):
 def handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key=None):
     st.subheader("📸 Instagram Single Post Analysis")
 
-    if st.button("📥 Fetch Instagram Data"):
-        post = mock_fetch_instagram_post_data(url, ig_api_key)
-        if enable_seo:
-            post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
-            time.sleep(5)
-        st.json(post)
+    with st.form(key="insta_single_form"):
+        enable_seo = st.checkbox("✨ Enable SEO Tagging", value=enable_seo)
+        st.text_input("📷 Instagram API Key (optional)", value=ig_api_key, key="single_ig_key")
+        submit = st.form_submit_button("📥 Fetch Instagram Data")
+        if submit:
+            ig_api_key = st.session_state.get("single_ig_key", ig_api_key)
+            post = mock_fetch_instagram_post_data(url, ig_api_key)
+            if enable_seo:
+                post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
+                time.sleep(5)
+            st.json(post)
 
 def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key=None):
     st.subheader("📸 Instagram Batch URL Analysis")
@@ -65,31 +70,36 @@ def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api
         st.info("📄 Please upload a file first.")
         return
 
-    if st.button("📥 Fetch Instagram Data"):
-        content = file.read().decode("utf-8")
-        urls = content.strip().splitlines()
-        results = []
-        for url in urls:
-            post = mock_fetch_instagram_post_data(url, ig_api_key)
-            if enable_seo:
-                post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
-                time.sleep(5)
-            results.append(post)
+    with st.form(key="insta_batch_form"):
+        enable_seo = st.checkbox("✨ Enable SEO Tagging", value=enable_seo)
+        st.text_input("📷 Instagram API Key (optional)", value=ig_api_key, key="batch_ig_key")
+        submit = st.form_submit_button("📥 Fetch Instagram Data")
+        if submit:
+            ig_api_key = st.session_state.get("batch_ig_key", ig_api_key)
+            content = file.read().decode("utf-8")
+            urls = content.strip().splitlines()
+            results = []
+            for url in urls:
+                post = mock_fetch_instagram_post_data(url, ig_api_key)
+                if enable_seo:
+                    post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
+                    time.sleep(5)
+                results.append(post)
 
-        df = pd.DataFrame(results)
-        st.dataframe(df)
+            df = pd.DataFrame(results)
+            st.dataframe(df)
 
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name="Instagram SEO")
-        output.seek(0)
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name="Instagram SEO")
+            output.seek(0)
 
-        st.download_button(
-            label=f"⬇️ Download Instagram SEO Report",
-            data=output,
-            file_name="instagram_seo.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            st.download_button(
+                label=f"⬇️ Download Instagram SEO Report",
+                data=output,
+                file_name="instagram_seo.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 def get_top_instagram_hashtags(topic):
     sample = {
