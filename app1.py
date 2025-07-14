@@ -43,10 +43,12 @@ with st.form(key="form"):
 
     elif platform == "Instagram":
         openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+
         if mode == "Single Video":
             instagram_url_input = st.text_input("🎥 Enter Instagram Video URL")
-        elif mode == "Upload URLs":
+        elif mode == "Upload URLs" or mode == "Batch Mode":
             ig_urls_file = st.file_uploader("📄 Upload CSV or TXT with Instagram Video URLs", type=["csv", "txt"])
+
         enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
         enable_transcript = False
         yt_api_key = ""
