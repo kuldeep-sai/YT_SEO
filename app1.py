@@ -1,122 +1,42 @@
-# utils/instagram_handler.py
-
 import streamlit as st
-import pandas as pd
-import time
-import requests
-import re
+from utils.instagram_handler import handle_instagram_single, handle_instagram_batch, handle_instagram_urls
 
-# --- STEP 1: Use public Instagram oEmbed API (simpler version, no access token) ---
+st.set_page_config(page_title="📸 Instagram SEO Helper")
+st.title("📸 Instagram SEO Analyzer")
 
-def extract_shortcode_from_url(url):
-    match = re.search(r"instagram.com/p/([a-zA-Z0-9_-]+)", url)
-    return match.group(1) if match else None
+mode = st.sidebar.selectbox("Select Mode", ["Single Video", "Batch (CSV/TXT)", "Batch (Not supported)", "About"])
 
-def fetch_instagram_post_data(shortcode):
-    post_url = f"https://api.instagram.com/oembed/?url=https://www.instagram.com/p/{shortcode}/"
-    response = requests.get(post_url)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        return {"error": f"Failed to fetch post. Status {response.status_code}"}
+openai_key = st.sidebar.text_input("🔐 OpenAI API Key", type="password")
+enable_seo = st.sidebar.checkbox("✨ Enable SEO Tagging", value=True)
 
-# --- STEP 2: Single Instagram video ---
-def handle_instagram_single(url, enable_seo, client, api_key):
-    st.subheader("📥 Instagram Video Details - Single")
-    st.write(f"🔗 Video URL: {url}")
+client = None
+if openai_key:
+    from openai import OpenAI
+    client = OpenAI(api_key=openai_key)
 
-    shortcode = extract_shortcode_from_url(url)
-    if not shortcode:
-        st.error("Invalid Instagram URL")
-        return
+if mode == "Single Video":
+    url = st.text_input("Paste Instagram Post URL:")
+    if url:
+        handle_instagram_single(url, enable_seo, client, openai_key)
 
-    data = fetch_instagram_post_data(shortcode)
-    if "error" in data:
-        st.error(data["error"])
-        return
+elif mode == "Batch (CSV/TXT)":
+    file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs")
+    if file:
+        handle_instagram_urls(file, enable_seo, client, openai_key)
 
-    video_info = {
-        "url": url,
-        "caption": data.get("title", ""),
-        "author": data.get("author_name"),
-        "media_id": shortcode
-    }
+elif mode == "Batch (Not supported)":
+    st.warning("Batch mode using public Instagram API is not supported.")
+    st.markdown("Use the CSV or TXT option instead.")
 
-    if enable_seo and client:
-        seo_output = generate_seo_tags(video_info, client)
-        video_info["seo_output"] = seo_output
-        st.markdown("### ✨ SEO Tags")
-        st.code(seo_output)
+else:
+    st.markdown("""
+        This tool extracts Instagram post info and generates SEO content using ChatGPT.
 
-    st.json(video_info)
+        ✅ Supports:
+        - Public Instagram posts via URL
+        - SEO captions, hashtags, keywords
 
-# --- STEP 3: Batch Mode ---
-def handle_instagram_batch(profile_url, max_posts, enable_seo, client, api_key):
-    st.subheader("📥 Instagram Batch Export")
-    st.warning("⚠️ Batch export not supported in public oEmbed API.")
+        ⚠️ Batch mode requires CSV/TXT upload.
 
-# --- STEP 4: From file ---
-def handle_instagram_urls(file, enable_seo, client, api_key):
-    st.subheader("📥 Instagram URLs from File")
-
-    if file.name.endswith("csv"):
-        urls = pd.read_csv(file).iloc[:, 0].tolist()
-    elif file.name.endswith("txt"):
-        urls = file.read().decode().splitlines()
-    else:
-        st.error("Unsupported file format")
-        return
-
-    all_data = []
-    for url in urls:
-        shortcode = extract_shortcode_from_url(url)
-        if not shortcode:
-            continue
-
-        data = fetch_instagram_post_data(shortcode)
-        if "error" in data:
-            continue
-
-        info = {
-            "url": url,
-            "caption": data.get("title", ""),
-            "author": data.get("author_name"),
-            "media_id": shortcode
-        }
-
-        if enable_seo and client:
-            seo_output = generate_seo_tags(info, client)
-            info["seo_output"] = seo_output
-            time.sleep(2)
-
-        all_data.append(info)
-
-    df = pd.DataFrame(all_data)
-    st.dataframe(df)
-    st.download_button(
-        label="⬇️ Download SEO Tags",
-        data=df.to_csv(index=False).encode(),
-        file_name="instagram_seo_tags.csv",
-        mime="text/csv"
-    )
-
-# --- STEP 5: SEO Generator ---
-def generate_seo_tags(data, client):
-    prompt = f"""
-    Analyze this Instagram post:
-    Caption: {data['caption']}
-    Author: {data['author']}
-
-    Generate:
-    - SEO optimized caption
-    - 5 trending hashtags
-    - Keywords summary
-    """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"OpenAI Error: {e}"
+        Built using [Streamlit](https://streamlit.io/)
+    """)
