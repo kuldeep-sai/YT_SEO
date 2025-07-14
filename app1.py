@@ -84,10 +84,10 @@ if submit:
         from utils.instagram_handler import handle_instagram_single, handle_instagram_batch, handle_instagram_urls
 
         if mode == "Single Video":
-            handle_instagram_single(instagram_url_input, enable_seo, client)
+            handle_instagram_single(instagram_url_input, enable_seo, client, instagram_api_key)
 
         elif mode == "Batch Mode":
-            handle_instagram_batch(instagram_profile_url, max_posts, enable_seo, client)
+            handle_instagram_batch(instagram_profile_url, max_posts, enable_seo, client, instagram_api_key)
 
         elif mode == "Upload URLs" and ig_urls_file is not None:
-            handle_instagram_urls(ig_urls_file, enable_seo, client)
+            handle_instagram_urls(ig_urls_file, enable_seo, client, instagram_api_key)
