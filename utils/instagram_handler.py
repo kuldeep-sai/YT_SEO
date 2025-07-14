@@ -2,6 +2,7 @@ import re
 import pandas as pd
 import time
 from io import BytesIO
+import streamlit as st
 
 
 def extract_instagram_post_id(url):
@@ -48,30 +49,40 @@ def generate_seo_from_instagram(post, client, openai_key, top_tags):
         return f"OpenAI Error: {e}"
 
 def handle_instagram_single(url, enable_seo, client, openai_key, top_tags):
+    st.subheader("📸 Instagram Single Post Analysis")
     post = mock_fetch_instagram_post_data(url)
     if enable_seo:
         post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
         time.sleep(5)
-    return [post]
+    st.json(post)
 
 def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags):
-    content = file.read().decode("utf-8")
-    urls = content.strip().splitlines()
-    results = []
-    for url in urls:
-        post = mock_fetch_instagram_post_data(url)
-        if enable_seo:
-            post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
-            time.sleep(5)
-        results.append(post)
+    st.subheader("📸 Instagram Batch URL Analysis")
+    if st.button("📥 Fetch Instagram Data"):
+        content = file.read().decode("utf-8")
+        urls = content.strip().splitlines()
+        results = []
+        for url in urls:
+            post = mock_fetch_instagram_post_data(url)
+            if enable_seo:
+                post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
+                time.sleep(5)
+            results.append(post)
 
-    # Auto-download report for Instagram batch results
-    df = pd.DataFrame(results)
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name="Instagram SEO")
-    output.seek(0)
-    return results, output
+        df = pd.DataFrame(results)
+        st.dataframe(df)
+
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name="Instagram SEO")
+        output.seek(0)
+
+        st.download_button(
+            label=f"⬇️ Download Instagram SEO Report",
+            data=output,
+            file_name="instagram_seo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 def get_top_instagram_hashtags(topic):
     sample = {
