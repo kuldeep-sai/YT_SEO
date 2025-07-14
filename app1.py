@@ -43,6 +43,7 @@ with st.form(key="form"):
 
     elif platform == "Instagram":
         openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+        instagram_api_key = st.text_input("🔐 Instagram API Key (optional)", type="password")
 
         if mode == "Single Video":
             instagram_url_input = st.text_input("🎥 Enter Instagram Video URL")
