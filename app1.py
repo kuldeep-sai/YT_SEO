@@ -17,6 +17,49 @@ from utils.youtube_handler import (
     get_top_video_tags
 )
 
+def generate_seo_tags(video, top_tags=None, client=None):
+    if not client:
+        return "❌ OpenAI API key is missing or not set."
+
+    tags_string = ", ".join(top_tags) if top_tags else ""
+    prompt = f"""
+You are a seasoned SEO strategist and social media growth expert.
+
+Your task is to generate a **high-converting, keyword-rich title** for this video/post that performs well on both YouTube and Instagram. The goal is to maximize **visibility, click-through rate (CTR), and search rankings** by including:
+
+- 🔑 High-volume keywords (especially early in the title)
+- ✅ Emotional triggers or curiosity elements
+- 📱 Social-first appeal (snackable, clickable phrasing)
+- 📈 Clear value proposition or outcome
+- ⏱ Keep it under 70 characters for best performance
+
+### Video Metadata:
+Title: {video['title']}
+Description: {video['description']}
+Tags: {video['tags']}
+Views: {video['views']}
+
+### Top trending tags from similar viral content:
+{tags_string}
+
+Now generate:
+1. A compelling SEO-optimized title (max 70 characters)
+2. A 150-word keyword-rich video description (2 short paras). At the end of the description, include this sentence exactly:
+[Download Naukri APP](https://play.google.com/store/apps/details?id=naukriApp.appModules.login&hl=en&utm_source=youtube&utm_medium=videos)
+3. 10 SEO-relevant hashtags
+4. 10 comma-separated long-tail keywords
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"OpenAI Error: {e}"
+
 st.set_page_config(page_title="📊 SEO Tools Hub", layout="centered")
 st.title("📊 YouTube & Instagram SEO Generator")
 
@@ -85,7 +128,6 @@ elif app == "Instagram":
 
     url = st.text_input("Paste Instagram Post URL:") if ig_mode == "Single Video" else None
     file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs") if ig_mode == "Batch (CSV/TXT)" else None
-
     enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
 
     top_tags = get_top_instagram_hashtags(seo_topic) if seo_topic else []
