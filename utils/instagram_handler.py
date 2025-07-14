@@ -9,13 +9,14 @@ def extract_instagram_post_id(url):
     match = re.search(r"instagram.com/p/([\w-]+)/", url)
     return match.group(1) if match else None
 
-def mock_fetch_instagram_post_data(url):
-    # Simulated placeholder for post data fetch
+def mock_fetch_instagram_post_data(url, ig_api_key=None):
+    # Simulated placeholder for post data fetch (replace this with real API logic if needed)
     return {
         "post_url": url,
         "caption": f"Sample caption extracted from {url}",
         "likes": 1234,
-        "hashtags": ["#ai", "#instagood", "#openai"]
+        "hashtags": ["#ai", "#instagood", "#openai"],
+        "api_key_used": bool(ig_api_key)
     }
 
 def generate_seo_from_instagram(post, client, openai_key, top_tags):
@@ -48,15 +49,17 @@ def generate_seo_from_instagram(post, client, openai_key, top_tags):
     except Exception as e:
         return f"OpenAI Error: {e}"
 
-def handle_instagram_single(url, enable_seo, client, openai_key, top_tags):
+def handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key=None):
     st.subheader("📸 Instagram Single Post Analysis")
-    post = mock_fetch_instagram_post_data(url)
-    if enable_seo:
-        post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
-        time.sleep(5)
-    st.json(post)
 
-def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags):
+    if st.button("📥 Fetch Instagram Data"):
+        post = mock_fetch_instagram_post_data(url, ig_api_key)
+        if enable_seo:
+            post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
+            time.sleep(5)
+        st.json(post)
+
+def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key=None):
     st.subheader("📸 Instagram Batch URL Analysis")
     if not file:
         st.info("📄 Please upload a file first.")
@@ -67,7 +70,7 @@ def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags):
         urls = content.strip().splitlines()
         results = []
         for url in urls:
-            post = mock_fetch_instagram_post_data(url)
+            post = mock_fetch_instagram_post_data(url, ig_api_key)
             if enable_seo:
                 post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
                 time.sleep(5)
