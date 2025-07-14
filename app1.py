@@ -80,6 +80,7 @@ if app == "YouTube":
 # ----------- INSTAGRAM ----------- #
 elif app == "Instagram":
     ig_mode = st.radio("Select Mode", ["Single Video", "Batch (CSV/TXT)", "About"], horizontal=True)
+    ig_api_key = st.text_input("📷 Instagram API Key (optional)", type="password")
 
     top_tags = get_top_instagram_hashtags(seo_topic) if seo_topic else []
     if seo_topic and top_tags:
@@ -89,13 +90,13 @@ elif app == "Instagram":
     results = []
     if ig_mode == "Single Video":
         url = st.text_input("Paste Instagram Post URL:")
-        if url and st.button("📥 Fetch Post"):
-            results = handle_instagram_single(url, enable_seo, client, openai_key, top_tags)
+        if url:
+            handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key)
 
     elif ig_mode == "Batch (CSV/TXT)":
         file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs")
-        if file and st.button("📥 Process File"):
-            results = handle_instagram_urls(file, enable_seo, client, openai_key, top_tags)
+        if file:
+            handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key)
 
     else:
         st.markdown("""
@@ -109,19 +110,3 @@ elif app == "Instagram":
 
             Built using [Streamlit](https://streamlit.io/)
         """)
-
-    if results:
-        df = pd.DataFrame(results)
-        st.dataframe(df)
-
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name="Instagram SEO")
-        output.seek(0)
-
-        st.download_button(
-            label="⬇️ Download Instagram SEO Report",
-            data=output,
-            file_name="instagram_seo.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
