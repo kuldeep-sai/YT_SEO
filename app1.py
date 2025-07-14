@@ -1,36 +1,21 @@
 # utils/instagram_handler.py
 import streamlit as st
 import pandas as pd
-import requests
 import time
 
-
-def get_instagram_post_data(access_token, ig_user_id, limit=10):
-    url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media"
-    params = {
-        "fields": "caption,media_url,permalink,like_count,comments_count,timestamp",
-        "access_token": access_token,
-        "limit": limit
-    }
-    res = requests.get(url, params=params)
-    if res.status_code != 200:
-        raise Exception(f"Graph API Error: {res.text}")
-    return res.json().get("data", [])
-
-def get_instagram_video_details(permalink):
-    return {
-        "url": permalink,
-        "caption": "Could not fetch caption via scraping",
-        "likes": 0,
-        "comments": 0
-    }
+# Stub methods for now
 
 def handle_instagram_single(url, enable_seo, client, api_key):
     st.subheader("📥 Instagram Video Details - Single")
     st.write(f"🔗 Video URL: {url}")
 
-    # Meta Graph API doesn't support public scraping by URL; you'd need to resolve URL to media ID
-    video_info = get_instagram_video_details(url)
+    # Simulated metadata extraction
+    video_info = {
+        "url": url,
+        "caption": "Sample caption extracted from Instagram",
+        "likes": 1234,
+        "comments": 56
+    }
 
     if enable_seo and client:
         seo_output = generate_seo_tags(video_info, client)
@@ -40,30 +25,25 @@ def handle_instagram_single(url, enable_seo, client, api_key):
 
     st.json(video_info)
 
-def handle_instagram_batch(profile_id, max_posts, enable_seo, client, access_token):
+def handle_instagram_batch(profile_url, max_posts, enable_seo, client, api_key):
     st.subheader("📥 Instagram Batch Export")
-    st.write(f"Fetching {max_posts} posts for profile ID: {profile_id}")
+    st.write(f"Fetching {max_posts} posts from: {profile_url}")
 
-    try:
-        posts = get_instagram_post_data(access_token, profile_id, limit=max_posts)
-    except Exception as e:
-        st.error(f"❌ Error: {e}")
-        return
-
+    # Simulated fetch
     all_data = []
-    for post in posts:
+    for i in range(max_posts):
+        url = f"https://www.instagram.com/p/fake_id_{i}/"
         data = {
-            "url": post.get("permalink"),
-            "caption": post.get("caption", ""),
-            "likes": post.get("like_count", 0),
-            "comments": post.get("comments_count", 0),
-            "timestamp": post.get("timestamp")
+            "url": url,
+            "caption": f"Sample caption {i}",
+            "likes": 100 + i,
+            "comments": 5 + i
         }
 
         if enable_seo and client:
             seo_output = generate_seo_tags(data, client)
             data["seo_output"] = seo_output
-            time.sleep(2)
+            time.sleep(2)  # Delay to avoid OpenAI rate limits
 
         all_data.append(data)
 
@@ -90,7 +70,12 @@ def handle_instagram_urls(file, enable_seo, client, api_key):
 
     all_data = []
     for url in urls:
-        data = get_instagram_video_details(url)
+        data = {
+            "url": url,
+            "caption": f"Sample caption for {url}",
+            "likes": 250,
+            "comments": 30
+        }
 
         if enable_seo and client:
             seo_output = generate_seo_tags(data, client)
