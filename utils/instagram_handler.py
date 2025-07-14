@@ -53,11 +53,11 @@ def handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_ap
     st.subheader("📸 Instagram Single Post Analysis")
 
     with st.form(key="insta_single_form"):
+        ig_api_key = st.text_input("📷 Instagram API Key (optional)", value=ig_api_key, key="single_ig_key")
+        url = st.text_input("📎 Paste Instagram Post URL:", value=url, key="single_post_url")
         enable_seo = st.checkbox("✨ Enable SEO Tagging", value=enable_seo)
-        st.text_input("📷 Instagram API Key (optional)", value=ig_api_key, key="single_ig_key")
         submit = st.form_submit_button("📥 Fetch Instagram Data")
         if submit:
-            ig_api_key = st.session_state.get("single_ig_key", ig_api_key)
             post = mock_fetch_instagram_post_data(url, ig_api_key)
             if enable_seo:
                 post["seo_output"] = generate_seo_from_instagram(post, client, openai_key, top_tags)
@@ -71,11 +71,10 @@ def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api
         return
 
     with st.form(key="insta_batch_form"):
+        ig_api_key = st.text_input("📷 Instagram API Key (optional)", value=ig_api_key, key="batch_ig_key")
         enable_seo = st.checkbox("✨ Enable SEO Tagging", value=enable_seo)
-        st.text_input("📷 Instagram API Key (optional)", value=ig_api_key, key="batch_ig_key")
         submit = st.form_submit_button("📥 Fetch Instagram Data")
         if submit:
-            ig_api_key = st.session_state.get("batch_ig_key", ig_api_key)
             content = file.read().decode("utf-8")
             urls = content.strip().splitlines()
             results = []
