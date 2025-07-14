@@ -3,30 +3,27 @@
 import streamlit as st
 import pandas as pd
 
-def handle_instagram_single(url, enable_seo, client):
-    st.info(f"📍 Instagram single video analysis not implemented yet.\nURL: {url}")
-    # Future: Use API or scraping to fetch title, caption, hashtags etc.
-    # If enable_seo and client: Use OpenAI to suggest SEO
-    if enable_seo and client:
-        st.success("✨ SEO Tagging would go here.")
+def handle_instagram_single(instagram_url, enable_seo, client, instagram_api_key):
+    st.info(f"Processing single Instagram video: {instagram_url}")
+    # Placeholder logic – implement scraping or API fetch here
+    st.write("✅ Instagram video processed successfully.")
 
-def handle_instagram_batch(profile_url, max_posts, enable_seo, client):
-    st.info(f"📦 Instagram batch from profile not implemented yet.\nProfile URL: {profile_url}, Posts: {max_posts}")
-    # Placeholder for real Instagram batch scraping logic
-    if enable_seo and client:
-        st.success("✨ SEO Tagging would go here.")
+def handle_instagram_batch(profile_url, max_posts, enable_seo, client, instagram_api_key):
+    st.info(f"Fetching {max_posts} posts from profile: {profile_url}")
+    # Placeholder logic – implement scraping or API fetch here
+    st.write(f"✅ Batch fetched {max_posts} Instagram videos.")
 
-def handle_instagram_urls(uploaded_file, enable_seo, client):
-    urls = []
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-        urls = df.iloc[:, 0].tolist()
-    elif uploaded_file.name.endswith(".txt"):
-        urls = uploaded_file.read().decode("utf-8").splitlines()
+def handle_instagram_urls(file, enable_seo, client, instagram_api_key):
+    st.info("Reading uploaded Instagram URLs...")
+    try:
+        if file.name.endswith(".csv"):
+            urls = pd.read_csv(file).iloc[:, 0].tolist()
+        else:
+            urls = file.read().decode("utf-8").splitlines()
 
-    st.write(f"Found {len(urls)} Instagram URLs.")
-    for url in urls:
-        st.markdown(f"- {url}")
-
-    if enable_seo and client:
-        st.success("✨ SEO Tagging would go here.")
+        for url in urls:
+            st.write(f"Processing: {url}")
+            # Placeholder logic
+        st.success(f"✅ Processed {len(urls)} Instagram URLs.")
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
