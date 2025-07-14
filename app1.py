@@ -1,4 +1,10 @@
 # utils/instagram_handler.py
+from utils.instagram_handler import (
+    handle_instagram_single,
+    handle_instagram_batch,
+    handle_instagram_urls
+)
+
 import streamlit as st
 import pandas as pd
 import time
