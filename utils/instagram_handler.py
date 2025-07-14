@@ -58,6 +58,10 @@ def handle_instagram_single(url, enable_seo, client, openai_key, top_tags):
 
 def handle_instagram_urls(file, enable_seo, client, openai_key, top_tags):
     st.subheader("📸 Instagram Batch URL Analysis")
+    if not file:
+        st.info("📄 Please upload a file first.")
+        return
+
     if st.button("📥 Fetch Instagram Data"):
         content = file.read().decode("utf-8")
         urls = content.strip().splitlines()
