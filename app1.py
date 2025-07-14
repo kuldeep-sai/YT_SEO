@@ -6,14 +6,14 @@ import time
 import requests
 import re
 
-# --- STEP 1: Use Meta Graph API for real Instagram data ---
+# --- STEP 1: Use public Instagram oEmbed API (simpler version, no access token) ---
 
 def extract_shortcode_from_url(url):
     match = re.search(r"instagram.com/p/([a-zA-Z0-9_-]+)", url)
     return match.group(1) if match else None
 
-def fetch_instagram_post_data(access_token, ig_post_shortcode):
-    post_url = f"https://graph.facebook.com/v18.0/instagram_oembed?url=https://www.instagram.com/p/{ig_post_shortcode}&access_token={access_token}"
+def fetch_instagram_post_data(shortcode):
+    post_url = f"https://api.instagram.com/oembed/?url=https://www.instagram.com/p/{shortcode}/"
     response = requests.get(post_url)
     if response.status_code == 200:
         return response.json()
@@ -30,7 +30,7 @@ def handle_instagram_single(url, enable_seo, client, api_key):
         st.error("Invalid Instagram URL")
         return
 
-    data = fetch_instagram_post_data(api_key, shortcode)
+    data = fetch_instagram_post_data(shortcode)
     if "error" in data:
         st.error(data["error"])
         return
@@ -53,9 +53,7 @@ def handle_instagram_single(url, enable_seo, client, api_key):
 # --- STEP 3: Batch Mode ---
 def handle_instagram_batch(profile_url, max_posts, enable_seo, client, api_key):
     st.subheader("📥 Instagram Batch Export")
-    st.warning("⚠️ Batch export using Meta API requires Instagram Business account & FB App with approved scopes.")
-
-    st.write("Feature not fully implemented due to API constraints.")
+    st.warning("⚠️ Batch export not supported in public oEmbed API.")
 
 # --- STEP 4: From file ---
 def handle_instagram_urls(file, enable_seo, client, api_key):
@@ -75,7 +73,7 @@ def handle_instagram_urls(file, enable_seo, client, api_key):
         if not shortcode:
             continue
 
-        data = fetch_instagram_post_data(api_key, shortcode)
+        data = fetch_instagram_post_data(shortcode)
         if "error" in data:
             continue
 
