@@ -54,7 +54,7 @@ Top tags: {tags_string}
 
 Generate:
 1. A catchy SEO-optimized YouTube title (max 70 characters)
-2. A 2-paragraph SEO-rich video description (150 words max). **Add this sentence at the end: {link_line}**
+2. A 2-paragraph SEO-rich video description (150 words max). End with this sentence: \n{link_line}
 3. A list of 10 relevant SEO hashtags
 4. A comma-separated list of 10 long-tail keywords
 """
@@ -66,10 +66,9 @@ Post Content: {video['description']}
 Top Instagram hashtags: {tags_string}
 
 Generate:
-1. A high-performing SEO-friendly Instagram caption (under 150 words). Make it emotionally engaging.
-2. **Add this sentence at the end: {link_line}**
-3. A list of 10 Instagram hashtags
-4. A comma-separated list of 10 long-tail keywords
+1. A high-performing SEO-friendly Instagram caption (under 150 words). Make it emotionally engaging. End with this sentence: \n{link_line}
+2. A list of 10 Instagram hashtags
+3. A comma-separated list of 10 long-tail keywords
 """
 
     try:
