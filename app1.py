@@ -1,93 +1,131 @@
+# utils/instagram_handler.py
 import streamlit as st
-from googleapiclient.discovery import build
 import pandas as pd
-from io import BytesIO
+import requests
 import time
-from googleapiclient.errors import HttpError
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-from openai import OpenAI
-import os
-import re
 
-# Page setup
-st.set_page_config(page_title="YouTube & Instagram Video Exporter + SEO Generator", layout="centered")
-st.title("📊 YouTube & Instagram Video Exporter + SEO Generator + Transcript")
 
-st.markdown("Export videos from YouTube or Instagram. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
+def get_instagram_post_data(access_token, ig_user_id, limit=10):
+    url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media"
+    params = {
+        "fields": "caption,media_url,permalink,like_count,comments_count,timestamp",
+        "access_token": access_token,
+        "limit": limit
+    }
+    res = requests.get(url, params=params)
+    if res.status_code != 200:
+        raise Exception(f"Graph API Error: {res.text}")
+    return res.json().get("data", [])
 
-# Platform selection
-platform = st.radio("📺 Select Platform", ["YouTube", "Instagram"], horizontal=True)
+def get_instagram_video_details(permalink):
+    return {
+        "url": permalink,
+        "caption": "Could not fetch caption via scraping",
+        "likes": 0,
+        "comments": 0
+    }
 
-# Mode selection
-mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
+def handle_instagram_single(url, enable_seo, client, api_key):
+    st.subheader("📥 Instagram Video Details - Single")
+    st.write(f"🔗 Video URL: {url}")
 
-# Input form
-with st.form(key="form"):
-    if platform == "YouTube":
-        yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-        openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
-        seo_topic = st.text_input("📈 (Optional) Topic for analyzing top-ranking SEO tags")
+    # Meta Graph API doesn't support public scraping by URL; you'd need to resolve URL to media ID
+    video_info = get_instagram_video_details(url)
 
-        if mode == "Batch Mode":
-            channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-            batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
-            start_index = (batch_number - 1) * 500
-            num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=500, step=1)
-        elif mode == "Single Video":
-            video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
-        else:
-            uploaded_file = st.file_uploader("📄 Upload CSV or TXT with YouTube Video URLs", type=["csv", "txt"])
+    if enable_seo and client:
+        seo_output = generate_seo_tags(video_info, client)
+        video_info["seo_output"] = seo_output
+        st.markdown("### ✨ SEO Tags")
+        st.code(seo_output)
 
-        enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
-        enable_transcript = st.checkbox("📝 Generate Transcripts")
+    st.json(video_info)
 
-    elif platform == "Instagram":
-        openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
-        instagram_api_key = st.text_input("🔐 Instagram API Key (optional)", type="password")
+def handle_instagram_batch(profile_id, max_posts, enable_seo, client, access_token):
+    st.subheader("📥 Instagram Batch Export")
+    st.write(f"Fetching {max_posts} posts for profile ID: {profile_id}")
 
-        if mode == "Single Video":
-            instagram_url_input = st.text_input("🎥 Enter Instagram Video URL")
-        elif mode == "Batch Mode":
-            st.markdown("🔗 **Enter Instagram Profile URL and Number of Posts to Fetch**")
-            instagram_profile_url = st.text_input("🔗 Instagram Profile URL")
-            max_posts = st.number_input("📄 Number of posts to fetch", min_value=1, max_value=500, value=50)
-        else:
-            ig_urls_file = st.file_uploader("📄 Upload CSV or TXT with Instagram Video URLs", type=["csv", "txt"])
+    try:
+        posts = get_instagram_post_data(access_token, profile_id, limit=max_posts)
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+        return
 
-        enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
-        enable_transcript = False
-        yt_api_key = ""
-        seo_topic = ""
+    all_data = []
+    for post in posts:
+        data = {
+            "url": post.get("permalink"),
+            "caption": post.get("caption", ""),
+            "likes": post.get("like_count", 0),
+            "comments": post.get("comments_count", 0),
+            "timestamp": post.get("timestamp")
+        }
 
-    submit = st.form_submit_button("📥 Fetch Video(s)")
+        if enable_seo and client:
+            seo_output = generate_seo_tags(data, client)
+            data["seo_output"] = seo_output
+            time.sleep(2)
 
-# Use provided API key or fallback to secrets
-effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
-client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
+        all_data.append(data)
 
-# 🚀 Processing logic
-if submit:
-    if platform == "YouTube":
-        from utils.youtube_handler import handle_youtube_batch, handle_youtube_single, handle_youtube_urls
-        youtube = build("youtube", "v3", developerKey=yt_api_key)
+    df = pd.DataFrame(all_data)
+    st.dataframe(df)
 
-        if mode == "Batch Mode":
-            handle_youtube_batch(youtube, channel_id, start_index, num_videos, enable_seo, enable_transcript, client, seo_topic)
+    st.download_button(
+        label="⬇️ Download Instagram Data",
+        data=df.to_csv(index=False).encode(),
+        file_name="instagram_data.csv",
+        mime="text/csv"
+    )
 
-        elif mode == "Single Video":
-            handle_youtube_single(youtube, video_id_input, enable_seo, enable_transcript, client, seo_topic)
+def handle_instagram_urls(file, enable_seo, client, api_key):
+    st.subheader("📥 Instagram URLs from File")
 
-        elif mode == "Upload URLs" and uploaded_file is not None:
-            handle_youtube_urls(uploaded_file, youtube, enable_seo, enable_transcript, client, seo_topic)
+    if file.name.endswith("csv"):
+        urls = pd.read_csv(file).iloc[:, 0].tolist()
+    elif file.name.endswith("txt"):
+        urls = file.read().decode().splitlines()
+    else:
+        st.error("Unsupported file format")
+        return
 
-    elif platform == "Instagram":
-        from utils.instagram_handler import handle_instagram_single, handle_instagram_batch, handle_instagram_urls
+    all_data = []
+    for url in urls:
+        data = get_instagram_video_details(url)
 
-        if mode == "Single Video":
-            handle_instagram_single(instagram_url_input, enable_seo, client, instagram_api_key)
+        if enable_seo and client:
+            seo_output = generate_seo_tags(data, client)
+            data["seo_output"] = seo_output
+            time.sleep(2)
 
-        elif mode == "Batch Mode":
-            handle_instagram_batch(instagram_profile_url, max_posts, enable_seo, client, instagram_api_key)
+        all_data.append(data)
 
-        elif mode == "Upload URLs" and ig_urls_file is not None:
-            handle_instagram_urls(ig_urls_file, enable_seo, client, instagram_api_key)
+    df = pd.DataFrame(all_data)
+    st.dataframe(df)
+    st.download_button(
+        label="⬇️ Download SEO Tags",
+        data=df.to_csv(index=False).encode(),
+        file_name="instagram_seo_tags.csv",
+        mime="text/csv"
+    )
+
+def generate_seo_tags(data, client):
+    prompt = f"""
+    Analyze this Instagram post:
+    Caption: {data['caption']}
+    Likes: {data['likes']}
+    Comments: {data['comments']}
+
+    Generate:
+    - SEO optimized caption
+    - 5 trending hashtags
+    - Keywords summary
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"OpenAI Error: {e}"
