@@ -26,7 +26,6 @@ app = st.radio("Select Platform", ["YouTube", "Instagram"], horizontal=True)
 # Common input fields
 openai_key = st.text_input("🔐 OpenAI API Key", type="password")
 seo_topic = st.text_input("📈 (Optional) SEO Topic for trending tags")
-enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
 
 client = None
 if openai_key:
@@ -36,6 +35,8 @@ if openai_key:
 if app == "YouTube":
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
     yt_mode = st.radio("Select Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
+
+    enable_seo = st.checkbox("✨ Enable SEO Tagging", value=True)
 
     top_tags = get_top_video_tags(yt_api_key, seo_topic) if seo_topic else []
     if seo_topic and top_tags:
@@ -89,14 +90,12 @@ elif app == "Instagram":
 
     results = []
     if ig_mode == "Single Video":
-        url = st.text_input("Paste Instagram Post URL:")
-        if url:
-            handle_instagram_single(url, enable_seo, client, openai_key, top_tags, ig_api_key)
+        handle_instagram_single("", True, client, openai_key, top_tags, ig_api_key)
 
     elif ig_mode == "Batch (CSV/TXT)":
         file = st.file_uploader("Upload .csv or .txt file with Instagram post URLs")
         if file:
-            handle_instagram_urls(file, enable_seo, client, openai_key, top_tags, ig_api_key)
+            handle_instagram_urls(file, True, client, openai_key, top_tags, ig_api_key)
 
     else:
         st.markdown("""
@@ -110,3 +109,19 @@ elif app == "Instagram":
 
             Built using [Streamlit](https://streamlit.io/)
         """)
+
+    if results:
+        df = pd.DataFrame(results)
+        st.dataframe(df)
+
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name="Instagram SEO")
+        output.seek(0)
+
+        st.download_button(
+            label="⬇️ Download Instagram SEO Report",
+            data=output,
+            file_name="instagram_seo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
