@@ -10,13 +10,23 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 import yt_dlp
 
 # ----------------------------
-# CONFIG
+# STREAMLIT APP
 # ----------------------------
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "YOUR_YOUTUBE_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", None)
+st.title("🎥 YouTube SEO & Transcript Extractor")
 
-youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# ----------------------------
+# FRONT-END API KEY INPUT
+# ----------------------------
+st.sidebar.header("🔑 Enter API Keys")
+yt_api_key = st.sidebar.text_input("YouTube API Key", type="password")
+openai_api_key = st.sidebar.text_input("OpenAI API Key (optional)", type="password")
+
+if not yt_api_key:
+    st.warning("Please enter your YouTube API Key to continue.")
+    st.stop()
+
+client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+youtube = build("youtube", "v3", developerKey=yt_api_key)
 
 # ----------------------------
 # HELPERS
@@ -134,10 +144,8 @@ def fetch_video_info(video_id, client=None):
         return None, None
 
 # ----------------------------
-# STREAMLIT APP
+# INPUT METHODS
 # ----------------------------
-st.title("🎥 YouTube SEO & Transcript Extractor")
-
 option = st.radio("Choose Input Method", ["Single Video", "Playlist", "CSV Upload"])
 metadata_list = []
 transcripts_list = []
@@ -145,7 +153,7 @@ transcripts_list = []
 # SINGLE VIDEO
 if option == "Single Video":
     url = st.text_input("Enter YouTube video URL:")
-    if st.button("Fetch"):
+    if st.button("Fetch Video"):
         if url:
             video_id = extract_video_id(url)
             info, transcript = fetch_video_info(video_id, client)
