@@ -28,7 +28,6 @@ def extract_video_id(url):
 def fetch_fresh_transcript(video_id, client):
     if not client:
         return "❌ OpenAI key required for fresh transcripts."
-
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmpfile:
@@ -69,7 +68,6 @@ def fetch_transcript(video_id, client=None):
 def analyze_transcript(transcript_text, client):
     if not client or not transcript_text or transcript_text.startswith("Transcript error"):
         return "", "", "", ""
-
     try:
         prompt = f"""
         You are an SEO and YouTube content strategist.
@@ -82,14 +80,12 @@ def analyze_transcript(transcript_text, client):
         Transcript:
         {transcript_text[:5000]}
         """
-
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5
         )
         output = response.choices[0].message.content.strip().split("\n")
-
         summary = keywords = meta_desc = hashtags = ""
         for line in output:
             if line.lower().startswith("1"):
@@ -100,7 +96,6 @@ def analyze_transcript(transcript_text, client):
                 meta_desc = line.split(":", 1)[-1].strip()
             elif line.lower().startswith("4"):
                 hashtags = line.split(":", 1)[-1].strip()
-
         return summary, keywords, meta_desc, hashtags
     except Exception as e:
         return "", "", "", f"Error generating SEO data: {str(e)}"
@@ -112,71 +107,6 @@ def fetch_video_info(video_id, client=None):
             id=video_id
         )
         response = request.execute()
-
         if not response["items"]:
             st.warning(f"Video {video_id} not found or unavailable")
-            return None, None
-
-        item = response["items"][0]
-        info = {
-            "video_id": video_id,
-            "title": item["snippet"]["title"],
-            "description": item["snippet"].get("description", ""),
-            "channel_title": item["snippet"]["channelTitle"],
-            "publish_date": item["snippet"]["publishedAt"],
-            "views": item["statistics"].get("viewCount", "0"),
-            "likes": item["statistics"].get("likeCount", "0"),
-            "comments": item["statistics"].get("commentCount", "0"),
-            "duration": item["contentDetails"]["duration"],
-            "video_url": f"https://www.youtube.com/watch?v={video_id}"
-        }
-
-        transcript_text = fetch_transcript(video_id, client)
-        summary, keywords, meta_desc, hashtags = analyze_transcript(transcript_text, client)
-
-        info["summary"] = summary
-        info["seo_keywords"] = keywords
-        info["meta_description"] = meta_desc
-        info["hashtags"] = hashtags
-
-        return info, {"video_id": video_id, "transcript": transcript_text}
-    except HttpError as e:
-        st.warning(f"Skipping video {video_id} due to HttpError: {e}")
-        return None, None
-
-# ----------------------------
-# STREAMLIT APP
-# ----------------------------
-st.title("🎥 YouTube SEO & Transcript Extractor")
-
-option = st.radio("Choose Input Method", ["Single Video", "Playlist", "CSV Upload"])
-metadata_list = []
-transcripts_list = []
-
-if option == "Single Video":
-    url = st.text_input("Enter YouTube video URL:")
-    if st.button("Fetch"):
-        if url:
-            video_id = extract_video_id(url)
-            info, transcript = fetch_video_info(video_id, client)
-            if info:
-                metadata_list.append(info)
-                transcripts_list.append(transcript)
-                st.success(f"Fetched: {info['title']}")
-            else:
-                st.error("Video not found or skipped.")
-
-elif option == "Playlist":
-    playlist_url = st.text_input("Enter YouTube Playlist URL:")
-    if st.button("Fetch Playlist"):
-        if playlist_url:
-            match = re.search(r"list=([a-zA-Z0-9_-]+)", playlist_url)
-            if match:
-                playlist_id = match.group(1)
-                next_page_token = None
-                while True:
-                    pl_request = youtube.playlistItems().list(
-                        part="contentDetails",
-                        playlistId=playlist_id,
-                        maxResults=50,
-                        pageToken=next_page_token
+            return N
