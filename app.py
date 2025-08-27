@@ -71,7 +71,9 @@ def fetch_fresh_transcript(video_id, client):
 
 def fetch_transcript(video_id, client=None, use_openai=True):
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        # Updated method for new youtube-transcript-api
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = transcript_list.find_transcript(['en']).fetch()
         st.success(f"YouTube captions found for {video_id}")
         return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
@@ -128,7 +130,7 @@ def fetch_video_info(video_id, client=None):
         response = request.execute()
         if not response["items"]:
             st.warning(f"Video {video_id} not found or unavailable")
-            return None, None
+            return None
         item = response["items"][0]
         info = {
             "video_id": video_id,
