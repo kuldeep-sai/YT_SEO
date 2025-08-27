@@ -1,21 +1,8 @@
-streamlit
-pandas
-openai
-google-api-python-client
-youtube-transcript-api
-yt-dlp
-openpyxl
-
-
-# YouTube APIs
-google-api-python-client
-google-auth
-google-auth-oauthlib
-youtube_transcript_api
-
-# Instagram (via scraping or public data)
-beautifulsoup4
-lxml
-
-# Other utilities
-tqdm
+streamlit==1.26.0
+pandas==2.1.0
+openai==1.9.3
+google-api-python-client==2.88.0
+youtube-transcript-api==0.6.0
+yt-dlp==2025.08.27
+openpyxl==3.1.2
+XlsxWriter==4.1.3
