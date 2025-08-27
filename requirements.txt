@@ -1,9 +1,11 @@
-# Core dependencies
 streamlit
 pandas
 openai
-xlsxwriter
-requests
+google-api-python-client
+youtube-transcript-api
+yt-dlp
+openpyxl
+
 
 # YouTube APIs
 google-api-python-client
