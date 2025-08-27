@@ -166,7 +166,10 @@ def fetch_video_info(video_id, client=None):
 # ----------------------------
 # INPUT METHOD
 # ----------------------------
-option = st.radio("Choose Input Method", ["Single Video", "Playlist", "CSV Upload"])
+option = st.radio(
+    "Choose Input Method",
+    ["Single Video", "Playlist", "Channel", "CSV Upload"]
+)
 metadata_list = []
 
 # SINGLE VIDEO
@@ -206,6 +209,43 @@ elif option == "Playlist":
                     if not next_page_token:
                         break
                 st.success("Playlist fetched successfully!")
+
+# CHANNEL
+elif option == "Channel":
+    channel_id = st.text_input("Enter YouTube Channel ID:")
+    max_videos = st.number_input(
+        "Maximum videos to fetch", min_value=1, max_value=5000, value=50, step=10
+    )
+    if st.button("Fetch Channel Videos"):
+        if channel_id:
+            try:
+                res = youtube.channels().list(
+                    part="contentDetails", id=channel_id
+                ).execute()
+                uploads_playlist = res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+                next_page_token = None
+                total_fetched = 0
+                while total_fetched < max_videos:
+                    pl_request = youtube.playlistItems().list(
+                        part="contentDetails",
+                        playlistId=uploads_playlist,
+                        maxResults=min(50, max_videos - total_fetched),
+                        pageToken=next_page_token
+                    )
+                    pl_response = pl_request.execute()
+                    for item in pl_response["items"]:
+                        video_id = item["contentDetails"]["videoId"]
+                        info = fetch_video_info(video_id, client)
+                        if info:
+                            metadata_list.append(info)
+                            total_fetched += 1
+                    next_page_token = pl_response.get("nextPageToken")
+                    if not next_page_token or total_fetched >= max_videos:
+                        break
+                st.success(f"Fetched {total_fetched} videos from channel {channel_id}!")
+            except Exception as e:
+                st.error(f"Error fetching channel videos: {e}")
 
 # CSV UPLOAD
 elif option == "CSV Upload":
