@@ -12,7 +12,7 @@ import yt_dlp
 # ----------------------------
 # STREAMLIT APP
 # ----------------------------
-st.title("🎥 YouTube SEO & Transcript Extractor")
+st.title("🎥 YouTube SEO, Transcript & Metadata Extractor")
 
 # ----------------------------
 # FRONT-END API KEY INPUT
@@ -27,6 +27,9 @@ if not yt_api_key:
 
 client = OpenAI(api_key=openai_api_key) if openai_api_key else None
 youtube = build("youtube", "v3", developerKey=yt_api_key)
+use_openai_transcript = st.sidebar.checkbox(
+    "Use OpenAI transcription if YouTube captions unavailable", value=True
+)
 
 # ----------------------------
 # HELPERS
@@ -37,9 +40,10 @@ def extract_video_id(url):
 
 def fetch_fresh_transcript(video_id, client):
     if not client:
-        return "❌ OpenAI key required for fresh transcripts."
+        return "❌ OpenAI key required for transcription."
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
+        st.info(f"Downloading audio for video {video_id}...")
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmpfile:
             ydl_opts = {
                 "format": "bestaudio/best",
@@ -53,25 +57,31 @@ def fetch_fresh_transcript(video_id, client):
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            with open(tmpfile.name, "rb") as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    model="gpt-4o-mini-transcribe",
-                    file=audio_file
-                )
-            return transcript.text.strip()
+        st.info(f"Transcribing audio for video {video_id} with OpenAI...")
+        with open(tmpfile.name, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="gpt-4o-mini-transcribe",
+                file=audio_file
+            )
+        st.success(f"Transcript fetched via OpenAI for {video_id}")
+        return transcript.text.strip()
     except Exception as e:
+        st.error(f"Error fetching transcript for {video_id}: {str(e)}")
         return f"Transcript error: {str(e)}"
 
-def fetch_transcript(video_id, client=None):
+def fetch_transcript(video_id, client=None, use_openai=True):
     try:
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        st.success(f"YouTube captions found for {video_id}")
         return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
-        if client:
+        st.warning(f"No YouTube captions for {video_id}")
+        if client and use_openai:
             return fetch_fresh_transcript(video_id, client)
         else:
             return "Transcript not found"
     except Exception as e:
+        st.error(f"Error fetching transcript for {video_id}: {str(e)}")
         return f"Transcript error: {str(e)}"
 
 def analyze_transcript(transcript_text, client):
@@ -132,23 +142,23 @@ def fetch_video_info(video_id, client=None):
             "duration": item["contentDetails"]["duration"],
             "video_url": f"https://www.youtube.com/watch?v={video_id}"
         }
-        transcript_text = fetch_transcript(video_id, client)
+        transcript_text = fetch_transcript(video_id, client, use_openai_transcript)
         summary, keywords, meta_desc, hashtags = analyze_transcript(transcript_text, client)
         info["summary"] = summary
         info["seo_keywords"] = keywords
         info["meta_description"] = meta_desc
         info["hashtags"] = hashtags
-        return info, {"video_id": video_id, "transcript": transcript_text}
+        info["transcript"] = transcript_text
+        return info
     except HttpError as e:
         st.warning(f"Skipping video {video_id} due to HttpError: {e}")
-        return None, None
+        return None
 
 # ----------------------------
 # INPUT METHODS
 # ----------------------------
 option = st.radio("Choose Input Method", ["Single Video", "Playlist", "CSV Upload"])
 metadata_list = []
-transcripts_list = []
 
 # SINGLE VIDEO
 if option == "Single Video":
@@ -156,10 +166,9 @@ if option == "Single Video":
     if st.button("Fetch Video"):
         if url:
             video_id = extract_video_id(url)
-            info, transcript = fetch_video_info(video_id, client)
+            info = fetch_video_info(video_id, client)
             if info:
                 metadata_list.append(info)
-                transcripts_list.append(transcript)
                 st.success(f"Fetched: {info['title']}")
             else:
                 st.error("Video not found or skipped.")
@@ -183,10 +192,9 @@ elif option == "Playlist":
                     pl_response = pl_request.execute()
                     for item in pl_response["items"]:
                         video_id = item["contentDetails"]["videoId"]
-                        info, transcript = fetch_video_info(video_id, client)
+                        info = fetch_video_info(video_id, client)
                         if info:
                             metadata_list.append(info)
-                            transcripts_list.append(transcript)
                     next_page_token = pl_response.get("nextPageToken")
                     if not next_page_token:
                         break
@@ -199,24 +207,23 @@ elif option == "CSV Upload":
         df = pd.read_csv(uploaded_file)
         for url in df["video_url"]:
             video_id = extract_video_id(url)
-            info, transcript = fetch_video_info(video_id, client)
+            info = fetch_video_info(video_id, client)
             if info:
                 metadata_list.append(info)
-                transcripts_list.append(transcript)
         st.success("CSV processed successfully!")
 
+# ----------------------------
 # EXPORT TO EXCEL
+# ----------------------------
 if metadata_list:
     df_meta = pd.DataFrame(metadata_list)
-    df_trans = pd.DataFrame(transcripts_list)
     excel_file = "youtube_seo_data.xlsx"
     with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
-        df_meta.to_excel(writer, sheet_name="Metadata", index=False)
-        df_trans.to_excel(writer, sheet_name="Transcripts", index=False)
+        df_meta.to_excel(writer, sheet_name="Videos", index=False)
 
-    st.dataframe(df_meta[["title", "summary", "seo_keywords", "meta_description", "hashtags"]])
+    st.dataframe(df_meta[["title", "summary", "seo_keywords", "meta_description", "hashtags", "transcript"]])
     st.download_button(
-        "📥 Download Excel with SEO & Hashtags",
+        "📥 Download Excel with SEO & Transcript",
         data=open(excel_file, "rb"),
         file_name=excel_file,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
