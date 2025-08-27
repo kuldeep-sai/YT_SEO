@@ -149,14 +149,19 @@ def fetch_video_info(video_id, client=None):
             "video_url": f"https://www.youtube.com/watch?v={video_id}"
         }
 
+        # Fetch transcript if available
         transcript_text = fetch_transcript(video_id, client, use_openai_transcript)
-        summary, keywords, meta_desc, hashtags = generate_seo(info["title"], transcript_text, client)
+
+        # ALWAYS generate SEO using OpenAI, even if transcript is missing
+        summary, keywords, meta_desc, hashtags = generate_seo(
+            info["title"], transcript_text, client
+        )
 
         info["summary"] = summary
         info["seo_keywords"] = keywords
         info["meta_description"] = meta_desc
         info["hashtags"] = hashtags
-        info["transcript"] = transcript_text or "Transcript not found"
+        info["transcript"] = transcript_text or "Transcript not available"
 
         return info
     except HttpError as e:
@@ -260,21 +265,19 @@ elif option == "CSV Upload":
         st.success("CSV processed successfully!")
 
 # ----------------------------
-# DISPLAY & EXPORT TO EXCEL
+# DISPLAY & EXPORT
 # ----------------------------
 if metadata_list:
-    df_meta = pd.DataFrame(metadata_list)
-    
-    st.subheader("✅ Fetched Video Data")
-    st.dataframe(df_meta[["title","summary","seo_keywords","meta_description","hashtags","transcript"]])
-    
+    df = pd.DataFrame(metadata_list)
+    st.dataframe(df[["title","summary","seo_keywords","meta_description","hashtags","transcript"]])
+
     excel_file = "youtube_seo_data.xlsx"
     with pd.ExcelWriter(excel_file, engine="openpyxl") as writer:
-        df_meta.to_excel(writer, sheet_name="Videos", index=False)
+        df.to_excel(writer, index=False, sheet_name="YouTube_Data")
 
     st.download_button(
         "📥 Download Excel with SEO & Transcript",
-        data=open(excel_file,"rb"),
+        data=open(excel_file, "rb"),
         file_name=excel_file,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
