@@ -1,7 +1,6 @@
-streamlit==1.29.0
-pandas==2.1.0
-openai==1.7.0
-google-api-python-client==2.97.0
-youtube-transcript-api==0.6.0
-yt-dlp==2025.06.06
-openpyxl==3.1.2
+streamlit
+google-api-python-client
+pandas
+youtube-transcript-api
+openai
+xlsxwriter
