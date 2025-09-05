@@ -6,20 +6,19 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
 
 # ---------------- Page Setup ----------------
-st.set_page_config(page_title="YouTube Exporter + SEO + Transcript + Images", layout="centered")
-st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
-st.markdown(
-    "Export videos from YouTube channel, single video, or uploaded list. "
-    "Optionally generate SEO titles/descriptions, transcripts, and images from video titles."
-)
+st.set_page_config(page_title="YouTube SEO Toolkit", layout="wide")
+st.title("🎥 YouTube SEO Toolkit")
 
 # ---------------- Tabs ----------------
-tab1, tab2 = st.tabs(["Video Export", "SEO Topic Analysis"])
+tab1, tab2, tab3 = st.tabs([
+    "📊 Video Exporter",
+    "📈 SEO Topic Analysis",
+    "🔥 Trending Topic Finder"
+])
 
-# ---------------- Helper Functions ----------------
+# ---------------- Shared Functions ----------------
 def get_upload_playlist(youtube, channel_id):
     data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
     if not data.get("items"):
@@ -51,13 +50,12 @@ def get_video_info(youtube, video_id):
     if not res["items"]:
         return {"video_id": video_id, "error": "Video not found"}
     item = res["items"][0]
-    views = int(item["statistics"].get("viewCount", 0))
     return {
         "video_id": video_id,
         "title": item["snippet"]["title"],
         "description": item["snippet"]["description"],
         "tags": ", ".join(item["snippet"].get("tags", [])),
-        "views": views,
+        "views": int(item["statistics"].get("viewCount", 0)),
         "published_date": item["snippet"]["publishedAt"],
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
@@ -72,45 +70,6 @@ def fetch_transcript(video_id):
     except Exception:
         return "Transcript not found"
 
-def generate_seo_tags(video, client):
-    if not client:
-        return "OpenAI API key missing"
-    prompt = f"""
-    You are a YouTube SEO expert. Video info:
-
-    Title: {video['title']}
-    Description: {video['description']}
-    Views: {video['views']}
-
-    Generate:
-    - SEO title (≤70 chars)
-    - 150-word description
-    - 10 hashtags
-    - 10 long-tail keywords
-    """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"Error generating SEO: {e}"
-
-def generate_image(prompt, client):
-    if not client:
-        return None
-    try:
-        response = client.images.generate(
-            model="gpt-image-1",
-            prompt=f"Thumbnail for: {prompt}",
-            size="512x512"
-        )
-        return response.data[0].url
-    except Exception as e:
-        st.warning(f"Image generation failed for '{prompt}': {e}")
-        return None
-
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
     urls = content.splitlines()
@@ -121,178 +80,151 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
-def process_video(video, enable_seo, enable_transcript, enable_images, client):
-    if enable_seo:
-        video["seo_output"] = generate_seo_tags(video, client)
-    if enable_transcript:
-        video["transcript"] = fetch_transcript(video["video_id"])
-    if enable_images:
-        video["image_url"] = generate_image(video["title"], client)
-    return video
+def save_to_excel(data, filename):
+    output = BytesIO()
+    df = pd.DataFrame(data)
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False)
+    output.seek(0)
+    st.download_button(
+        f"⬇️ Download {filename}",
+        output,
+        filename,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-# ---------------- Tab 1: Video Export ----------------
+# ---------------- Tab 1: Video Exporter ----------------
 with tab1:
-    mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
+    st.subheader("📊 Export Videos + SEO + Transcript + Images")
 
-    with st.form(key="video_form"):
+    with st.form("export_form"):
         yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-        openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO & Images)", type="password")
+        openai_key_input = st.text_input("🤖 OpenAI API Key (optional)", type="password")
 
+        mode = st.radio("Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
         if mode == "Batch Mode":
-            channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-            batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
-            start_index = (batch_number - 1) * 500
-            num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
+            channel_id = st.text_input("📡 Channel ID")
+            num_videos = st.number_input("🎬 Number of videos", 1, 50, 10)
         elif mode == "Single Video":
-            video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
+            video_id_input = st.text_input("🎥 Video ID")
         else:
-            uploaded_file = st.file_uploader("📄 Upload CSV or TXT with YouTube Video URLs", type=["csv", "txt"])
+            uploaded_file = st.file_uploader("📄 Upload CSV/TXT with video URLs", type=["csv", "txt"])
 
-        enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
-        enable_transcript = st.checkbox("📝 Generate Transcripts")
-        enable_images = st.checkbox("🖼️ Generate Images from Video Title")
-        submit = st.form_submit_button("📥 Fetch Video(s)")
+        enable_seo = st.checkbox("✨ Enable SEO (ChatGPT)")
+        enable_transcript = st.checkbox("📝 Fetch Transcripts")
+        enable_images = st.checkbox("🖼️ Generate Thumbnails")
+        submit1 = st.form_submit_button("📥 Fetch")
 
-    effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
-    client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
-    if enable_images and not client:
-        st.warning("⚠️ OpenAI API key missing. Image generation will not work.")
+    if submit1 and yt_api_key:
+        youtube = build("youtube", "v3", developerKey=yt_api_key)
+        client = OpenAI(api_key=openai_key_input) if openai_key_input else None
 
-    if submit:
-        if not yt_api_key:
-            st.error("YouTube API Key required")
+        videos = []
+        if mode == "Batch Mode":
+            playlist_id = get_upload_playlist(youtube, channel_id)
+            video_meta = get_video_ids(youtube, playlist_id, max_videos=num_videos)
+            videos = [get_video_info(youtube, v["video_id"]) for v in video_meta]
+        elif mode == "Single Video":
+            videos = [get_video_info(youtube, video_id_input)]
         else:
-            try:
-                youtube = build("youtube", "v3", developerKey=yt_api_key)
-                videos_to_process = []
+            ids = extract_video_ids_from_urls(uploaded_file)
+            videos = [get_video_info(youtube, vid) for vid in ids]
 
-                if mode == "Batch Mode":
-                    playlist_id = get_upload_playlist(youtube, channel_id)
-                    video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
-                    selected_batch = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)[start_index:start_index + num_videos]
-                    videos_to_process = [get_video_info(youtube, v["video_id"]) for v in selected_batch]
+        results = []
+        for v in videos:
+            if enable_transcript:
+                v["transcript"] = fetch_transcript(v["video_id"])
+            if enable_images and client:
+                try:
+                    img = client.images.generate(model="gpt-image-1", prompt=f"Thumbnail for {v['title']}", size="512x512")
+                    v["image_url"] = img.data[0].url
+                except:
+                    v["image_url"] = None
+            results.append(v)
 
-                elif mode == "Single Video":
-                    videos_to_process = [get_video_info(youtube, video_id_input)]
+        for r in results:
+            st.markdown(f"### [{r['title']}]({r['url']}) ({r['views']} views)")
+            if "transcript" in r:
+                with st.expander("Transcript"):
+                    st.write(r["transcript"][:400] + "...")
+            if r.get("image_url"):
+                st.image(r["image_url"], use_container_width=True)
 
-                elif mode == "Upload URLs":
-                    video_ids = extract_video_ids_from_urls(uploaded_file)
-                    videos_to_process = [get_video_info(youtube, vid) for vid in video_ids]
-
-                progress_bar = st.progress(0)
-                video_details = []
-                total_videos = len(videos_to_process)
-
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(process_video, v, enable_seo, enable_transcript, enable_images, client) for v in videos_to_process]
-                    for i, future in enumerate(as_completed(futures), 1):
-                        video_details.append(future.result())
-                        progress_bar.progress(i / total_videos)
-
-                if video_details:
-                    for video in video_details:
-                        st.markdown("---")
-                        st.markdown(f"**Title:** [{video['title']}]({video['url']})")
-                        st.markdown(f"**Views:** {video['views']}  |  **Published:** {video['published_date']}")
-                        if enable_transcript and video.get("transcript"):
-                            with st.expander("Transcript"):
-                                st.write(video["transcript"][:300] + "...")
-                        if enable_seo and video.get("seo_output"):
-                            with st.expander("SEO Output"):
-                                st.write(video["seo_output"])
-                        if enable_images and video.get("image_url"):
-                            st.image(video["image_url"], use_container_width=True)
-
-                    df = pd.DataFrame(video_details)
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df.to_excel(writer, index=False)
-                    output.seek(0)
-                    st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx",
-                                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            except Exception as e:
-                st.error(f"Error: {e}")
+        save_to_excel(results, "video_export.xlsx")
 
 # ---------------- Tab 2: SEO Topic Analysis ----------------
 with tab2:
-    st.markdown("### 🔍 SEO Topic Analysis (Top Videos)")
+    st.subheader("📈 Analyze SEO for Topics")
 
-    yt_api_key_seo = st.text_input("🔑 YouTube API Key for SEO Analysis (Tab 2)", type="password")
-    openai_key_seo = st.text_input("🤖 OpenAI API Key for SEO Analysis (Tab 2)", type="password")
-    seo_topics_input = st.text_input(
-        "📈 Enter Topics/Keywords for SEO Analysis (comma separated, e.g. Python, AI, SEO)"
-    )
-    top_video_count = st.number_input("🎬 Number of top videos to analyze per topic", min_value=1, max_value=50, value=10, step=1)
-    
-    analyze_seo = st.button("Analyze Videos")
+    with st.form("seo_form"):
+        yt_api_key2 = st.text_input("🔑 YouTube API Key (Tab 2)", type="password")
+        openai_key2 = st.text_input("🤖 OpenAI Key (Tab 2)", type="password")
+        keywords_input = st.text_area("Enter topics (comma separated)")
+        uploaded_excel = st.file_uploader("📄 Or upload Excel with topics", type=["xlsx"])
+        top_count = st.number_input("Top videos per topic", 1, 20, 10)
+        submit2 = st.form_submit_button("🔍 Analyze")
 
-    if analyze_seo:
-        if not yt_api_key_seo or not openai_key_seo:
-            st.error("Please provide both YouTube and OpenAI API keys for SEO analysis")
-        elif not seo_topics_input:
-            st.warning("Please enter at least one topic to analyze")
-        else:
-            topics = [t.strip() for t in seo_topics_input.split(",") if t.strip()]
-            try:
-                youtube_seo = build("youtube", "v3", developerKey=yt_api_key_seo)
-                openai_seo_client = OpenAI(api_key=openai_key_seo)
+    if submit2 and yt_api_key2:
+        youtube = build("youtube", "v3", developerKey=yt_api_key2)
+        client2 = OpenAI(api_key=openai_key2) if openai_key2 else None
 
-                for topic in topics:
-                    st.info(f"Fetching top {top_video_count} videos for topic: '{topic}'")
-                    
-                    search_res = youtube_seo.search().list(
-                        q=topic,
-                        part="snippet",
-                        type="video",
-                        order="viewCount",
-                        maxResults=top_video_count
-                    ).execute()
-                    
-                    top_videos = []
-                    for item in search_res.get("items", []):
-                        vid_id = item["id"]["videoId"]
-                        vid_info = youtube_seo.videos().list(part="snippet,statistics", id=vid_id).execute()
-                        if vid_info["items"]:
-                            info = vid_info["items"][0]
-                            top_videos.append({
-                                "video_id": vid_id,
-                                "title": info["snippet"]["title"],
-                                "description": info["snippet"]["description"],
-                                "tags": ", ".join(info["snippet"].get("tags", [])),
-                                "views": int(info["statistics"].get("viewCount", 0)),
-                                "url": f"https://www.youtube.com/watch?v={vid_id}"
-                            })
+        topics = []
+        if keywords_input:
+            topics = [t.strip() for t in keywords_input.split(",") if t.strip()]
+        elif uploaded_excel:
+            df = pd.read_excel(uploaded_excel)
+            topics = df.iloc[:, 0].dropna().tolist()
 
-                    if not top_videos:
-                        st.warning(f"No videos found for topic: '{topic}'")
-                        continue
+        all_results = []
+        for topic in topics:
+            search = youtube.search().list(q=topic, part="snippet", type="video", order="viewCount", maxResults=top_count).execute()
+            for item in search.get("items", []):
+                vid = item["id"]["videoId"]
+                info = get_video_info(youtube, vid)
+                all_results.append(info)
+                st.markdown(f"### [{info['title']}]({info['url']}) ({info['views']} views)")
+                st.write(f"Tags: {info['tags']}")
+                if client2:
+                    prompt = f"Suggest SEO tags, hashtags, and a better title for:\nTitle: {info['title']}\nDescription: {info['description']}"
+                    try:
+                        seo_out = client2.chat.completions.create(model="gpt-4o", messages=[{"role":"user","content":prompt}])
+                        st.write(seo_out.choices[0].message.content)
+                    except:
+                        st.warning("SEO generation failed")
 
-                    for idx, video in enumerate(top_videos, 1):
-                        st.markdown("---")
-                        st.markdown(f"### {idx}. [{video['title']}]({video['url']})")
-                        st.markdown(f"**Views:** {video['views']}")
-                        st.markdown(f"**Description:** {video['description'][:300]}...")
-                        st.markdown(f"**Tags:** {video['tags'] or 'N/A'}")
-                        
-                        prompt = f"""
-                        You are a YouTube SEO expert. Video info:
+        save_to_excel(all_results, "seo_topic_analysis.xlsx")
 
-                        Title: {video['title']}
-                        Description: {video['description']}
-                        Tags: {video['tags']}
+# ---------------- Tab 3: Trending Topic Finder ----------------
+with tab3:
+    st.subheader("🔥 Find Trending Topics for Strategy")
 
-                        Suggest:
-                        - 10 SEO-optimized hashtags
-                        - 10 long-tail keywords
-                        - A better SEO-friendly title (if needed)
-                        """
-                        try:
-                            seo_output = openai_seo_client.chat.completions.create(
-                                model="gpt-4o",
-                                messages=[{"role": "user", "content": prompt}]
-                            )
-                            st.write(seo_output.choices[0].message.content)
-                        except Exception as e:
-                            st.warning(f"SEO generation failed for video '{video['title']}': {e}")
-            except Exception as e:
-                st.error(f"Error in SEO Topic Analysis: {e}")
+    with st.form("trend_form"):
+        yt_api_key3 = st.text_input("🔑 YouTube API Key (Tab 3)", type="password")
+        keywords_input3 = st.text_area("Enter seed topics (comma separated)")
+        uploaded_excel3 = st.file_uploader("📄 Or upload Excel with seed topics", type=["xlsx"])
+        top_count3 = st.number_input("Top videos per topic", 1, 20, 10, key="trend_count")
+        submit3 = st.form_submit_button("🚀 Find Trends")
+
+    if submit3 and yt_api_key3:
+        youtube = build("youtube", "v3", developerKey=yt_api_key3)
+
+        seeds = []
+        if keywords_input3:
+            seeds = [t.strip() for t in keywords_input3.split(",") if t.strip()]
+        elif uploaded_excel3:
+            df = pd.read_excel(uploaded_excel3)
+            seeds = df.iloc[:, 0].dropna().tolist()
+
+        trend_results = []
+        for seed in seeds:
+            st.info(f"Analyzing trending videos for: {seed}")
+            search = youtube.search().list(q=seed, part="snippet", type="video", order="viewCount", maxResults=top_count3).execute()
+            for item in search.get("items", []):
+                vid = item["id"]["videoId"]
+                info = get_video_info(youtube, vid)
+                trend_results.append(info)
+                st.markdown(f"### [{info['title']}]({info['url']}) ({info['views']} views)")
+                st.write(f"Tags: {info['tags']}")
+                st.write(f"Description: {info['description'][:300]}...")
+
+        save_to_excel(trend_results, "trending_topics.xlsx")
