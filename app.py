@@ -8,11 +8,11 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- Page Setup ----------------
-st.set_page_config(page_title="YouTube Video Exporter + SEO + Transcript + Images", layout="centered")
+st.set_page_config(page_title="YouTube Exporter + SEO + Transcript + Images", layout="centered")
 st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
 st.markdown(
     "Export videos from your YouTube channel, single video, or uploaded list. "
-    "Optionally generate SEO-optimized titles/descriptions, transcripts, and images based on video titles."
+    "Optionally generate SEO titles/descriptions, transcripts, and images from video titles."
 )
 
 # ---------------- Mode Selection ----------------
@@ -86,7 +86,7 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-# ---------------- Fixed Transcript Function ----------------
+# ---------------- Transcript Function ----------------
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -97,6 +97,7 @@ def fetch_transcript(video_id):
     except Exception:
         return "Transcript not found"
 
+# ---------------- SEO Function ----------------
 def generate_seo_tags(video):
     if not client:
         return "OpenAI API key missing"
@@ -122,6 +123,7 @@ def generate_seo_tags(video):
     except:
         return "Error generating SEO"
 
+# ---------------- Image Generation Function ----------------
 def generate_image(prompt):
     if not client:
         return None
