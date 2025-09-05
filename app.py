@@ -6,12 +6,13 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Exporter + SEO + Transcript + Images", layout="centered")
 st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
 st.markdown(
-    "Export videos from your YouTube channel, single video, or uploaded list. "
+    "Export videos from YouTube channel, single video, or uploaded list. "
     "Optionally generate SEO titles/descriptions, transcripts, and images from video titles."
 )
 
@@ -42,6 +43,8 @@ with st.form(key="form"):
 # ---------------- OpenAI Client ----------------
 effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
+if enable_images and not client:
+    st.warning("⚠️ OpenAI API key missing. Image generation will not work.")
 
 # ---------------- Helper Functions ----------------
 def get_upload_playlist(youtube, channel_id):
@@ -120,8 +123,8 @@ def generate_seo_tags(video):
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
-    except:
-        return "Error generating SEO"
+    except Exception as e:
+        return f"Error generating SEO: {e}"
 
 # ---------------- Image Generation Function ----------------
 def generate_image(prompt):
@@ -131,12 +134,14 @@ def generate_image(prompt):
         response = client.images.generate(
             model="gpt-image-1",
             prompt=f"Thumbnail for: {prompt}",
-            size="1024x1024"
+            size="512x512"
         )
         return response.data[0].url
-    except:
+    except Exception as e:
+        st.warning(f"Image generation failed for '{prompt}': {e}")
         return None
 
+# ---------------- Extract IDs from Uploaded File ----------------
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
     urls = content.splitlines()
@@ -147,6 +152,7 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
+# ---------------- Process Video ----------------
 def process_video(video):
     if enable_seo:
         video["seo_output"] = generate_seo_tags(video)
@@ -182,6 +188,7 @@ if submit:
             video_details = []
             total_videos = len(videos_to_process)
 
+            # Use threads to speed up API calls
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(process_video, v) for v in videos_to_process]
                 for i, future in enumerate(as_completed(futures), 1):
@@ -208,7 +215,8 @@ if submit:
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False)
                 output.seek(0)
-                st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except Exception as e:
             st.error(f"Error: {e}")
