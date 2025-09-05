@@ -86,11 +86,15 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
+# ---------------- Fixed Transcript Function ----------------
 def fetch_transcript(video_id):
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = transcript_list.find_transcript(['en']).fetch()
         return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
+        return "Transcript not found"
+    except Exception:
         return "Transcript not found"
 
 def generate_seo_tags(video):
@@ -176,7 +180,6 @@ if submit:
             video_details = []
             total_videos = len(videos_to_process)
 
-            from concurrent.futures import ThreadPoolExecutor, as_completed
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(process_video, v) for v in videos_to_process]
                 for i, future in enumerate(as_completed(futures), 1):
