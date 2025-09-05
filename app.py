@@ -8,8 +8,6 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import os
 import re
-import yt_dlp
-import tempfile
 import requests
 import zipfile
 import io
@@ -17,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Video Exporter + SEO + Transcript + Images", layout="centered")
-st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
+st.title("📊 YouTube Video Exporter + SEO + Transcript + Images (Cloud-Compatible)")
 st.markdown(
     "Export videos from your YouTube channel, single video, or uploaded list. "
     "Optionally generate SEO-optimized titles/descriptions, transcripts, and images based on video titles."
@@ -29,14 +27,14 @@ mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"
 # ---------------- Input Form ----------------
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-    openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO, Whisper, Image)", type="password")
+    openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO & Images)", type="password")
     seo_topic = st.text_input("📈 (Optional) Topic for analyzing top-ranking SEO tags")
 
     if mode == "Batch Mode":
         channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
         batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
         start_index = (batch_number - 1) * 500
-        num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=500, step=1)
+        num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
     elif mode == "Single Video":
         video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
     else:
@@ -55,10 +53,10 @@ client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
 def get_upload_playlist(youtube, channel_id):
     data = youtube.channels().list(part="contentDetails", id=channel_id).execute()
     if not data.get("items"):
-        raise ValueError(f"❌ No channel found for ID: {channel_id}. Please check the Channel ID.")
+        raise ValueError(f"No channel found for ID: {channel_id}")
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_video_ids(youtube, playlist_id, max_videos=10000):
+def get_video_ids(youtube, playlist_id, max_videos=1000):
     videos = []
     next_token = None
     while len(videos) < max_videos:
@@ -81,7 +79,7 @@ def get_video_ids(youtube, playlist_id, max_videos=10000):
 def get_video_info(youtube, video_id):
     res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
     if not res["items"]:
-        return {"video_id": video_id, "error": "Video not found or unavailable"}
+        return {"video_id": video_id, "error": "Video not found"}
     item = res["items"][0]
     views = int(item["statistics"].get("viewCount", 0))
     return {
@@ -97,11 +95,7 @@ def get_video_info(youtube, video_id):
 def get_top_video_tags(youtube, search_query, max_results=20):
     try:
         search_res = youtube.search().list(
-            q=search_query,
-            part="snippet",
-            type="video",
-            order="viewCount",
-            maxResults=max_results
+            q=search_query, part="snippet", type="video", order="viewCount", maxResults=max_results
         ).execute()
         video_ids = [item["id"]["videoId"] for item in search_res["items"]]
         tags = []
@@ -111,28 +105,26 @@ def get_top_video_tags(youtube, search_query, max_results=20):
                 tags.extend(res["items"][0]["snippet"].get("tags", []))
         tag_freq = pd.Series(tags).value_counts()
         return tag_freq.index.tolist()[:20]
-    except Exception as e:
-        return [f"Error: {str(e)}"]
+    except:
+        return []
 
 def generate_seo_tags(video, top_tags=None):
     if not client:
-        return "❌ OpenAI API key is missing or not set."
+        return "OpenAI API key missing"
     tags_string = ", ".join(top_tags) if top_tags else ""
     prompt = f"""
-    You are an expert YouTube SEO optimizer. Given this video metadata:
+    You are a YouTube SEO expert. Video info:
 
     Title: {video['title']}
     Description: {video['description']}
-    Tags: {video['tags']}
     Views: {video['views']}
-
-    Top trending tags: {tags_string}
+    Top tags: {tags_string}
 
     Generate:
-    - A compelling SEO-optimized YouTube title (under 70 characters, with keywords early)
-    - A 150-word keyword-rich video description (2 paragraphs max)
-    - A list of 10 relevant SEO hashtags
-    - A list of 10 comma-separated long-tail keywords
+    - SEO title (≤70 chars)
+    - 150-word description
+    - 10 hashtags
+    - 10 long-tail keywords
     """
     try:
         response = client.chat.completions.create(
@@ -140,55 +132,28 @@ def generate_seo_tags(video, top_tags=None):
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
-    except Exception as e:
-        return f"OpenAI Error: {e}"
+    except:
+        return "Error generating SEO"
 
 def fetch_transcript(video_id):
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "hi"])
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
         return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
-        pass
-    except Exception as e:
-        return f"⚠️ Transcript API error: {str(e)}"
-
-    if not client:
-        return "❌ OpenAI API key is required for Whisper fallback."
-
-    try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        with tempfile.TemporaryDirectory() as tmpdir:
-            audio_path = f"{tmpdir}/{video_id}.mp3"
-            ydl_opts = {
-                "format": "bestaudio/best",
-                "outtmpl": audio_path,
-                "quiet": True,
-                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            with open(audio_path, "rb") as f:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=f
-                )
-            return transcript.text
-    except Exception as e:
-        return f"❌ Whisper fallback failed: {str(e)}"
+        return "Transcript not found"
 
 def generate_image(prompt):
     if not client:
-        return None, "❌ OpenAI API key required for image generation."
+        return None
     try:
         response = client.images.generate(
             model="gpt-image-1",
-            prompt=f"Create a YouTube thumbnail style image for: {prompt}",
+            prompt=f"Thumbnail for: {prompt}",
             size="1024x1024"
         )
-        image_url = response.data[0].url
-        return image_url, None
-    except Exception as e:
-        return None, f"❌ Image generation failed: {str(e)}"
+        return response.data[0].url
+    except:
+        return None
 
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
@@ -201,64 +166,39 @@ def extract_video_ids_from_urls(file):
     return ids
 
 def process_video(video, top_tags, enable_seo, enable_transcript, enable_images):
-    try:
-        if enable_seo:
-            video["seo_output"] = generate_seo_tags(video, top_tags)
-        if enable_transcript:
-            video["transcript"] = fetch_transcript(video["video_id"])
-        if enable_images:
-            img_url, err = generate_image(video["title"])
-            video["image_url"] = img_url if img_url else err
-        return video
-    except Exception as e:
-        video["error"] = f"Processing error: {str(e)}"
-        return video
+    if enable_seo:
+        video["seo_output"] = generate_seo_tags(video, top_tags)
+    if enable_transcript:
+        video["transcript"] = fetch_transcript(video["video_id"])
+    if enable_images:
+        video["image_url"] = generate_image(video["title"])
+    return video
 
-# ---------------- Fetch Logic with Parallel Processing ----------------
+# ---------------- Fetch Videos ----------------
 if submit:
     if not yt_api_key:
-        st.error("❌ Please enter your YouTube API Key.")
+        st.error("YouTube API Key required")
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
             top_tags = get_top_video_tags(youtube, seo_topic) if seo_topic else []
 
-            if seo_topic and top_tags:
-                st.markdown(f"🔝 Top tags for **{seo_topic}**:")
-                st.write(", ".join(top_tags))
-
-            video_details = []
-
-            # ---------------- Get Video List ----------------
             if mode == "Batch Mode":
-                if not channel_id:
-                    st.error("❌ Please enter Channel ID.")
-                    st.stop()
-                try:
-                    playlist_id = get_upload_playlist(youtube, channel_id)
-                except ValueError as e:
-                    st.error(str(e))
-                    st.stop()
+                playlist_id = get_upload_playlist(youtube, channel_id)
                 video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
-                video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
-                selected_batch = video_meta_sorted[start_index:start_index + num_videos]
+                selected_batch = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)[start_index:start_index + num_videos]
                 videos_to_process = [get_video_info(youtube, v["video_id"]) for v in selected_batch]
 
             elif mode == "Single Video":
-                if not video_id_input:
-                    st.error("❌ Please enter a Video ID.")
-                    st.stop()
                 videos_to_process = [get_video_info(youtube, video_id_input)]
 
             elif mode == "Upload URLs":
-                if not uploaded_file:
-                    st.error("❌ Please upload a file with video URLs.")
-                    st.stop()
                 video_ids = extract_video_ids_from_urls(uploaded_file)
                 videos_to_process = [get_video_info(youtube, vid) for vid in video_ids]
 
             # ---------------- Parallel Processing ----------------
             progress_bar = st.progress(0)
+            video_details = []
             total_videos = len(videos_to_process)
 
             with ThreadPoolExecutor(max_workers=5) as executor:
@@ -268,74 +208,28 @@ if submit:
                     video_details.append(future.result())
                     progress_bar.progress(i / total_videos)
 
-            # ---------------- Display Preview Cards ----------------
+            # ---------------- Display & Download ----------------
             if video_details:
-                st.markdown("## 🎬 Video Preview Cards")
-                for idx, video in enumerate(video_details):
+                for video in video_details:
                     st.markdown("---")
-                    cols = st.columns([1, 2])
-                    with cols[0]:
-                        img_url = video.get("image_url")
-                        if img_url and "http" in img_url:
-                            try:
-                                response = requests.get(img_url)
-                                if response.status_code == 200:
-                                    st.image(response.content, use_container_width=True)
-                                else:
-                                    st.write("❌ Failed to load image")
-                            except Exception as e:
-                                st.write(f"❌ Image load error: {e}")
-                        else:
-                            st.write("No image available")
+                    st.markdown(f"**Title:** [{video['title']}]({video['url']})")
+                    st.markdown(f"**Views:** {video['views']}  |  **Published:** {video['published_date']}")
+                    if enable_transcript and video.get("transcript"):
+                        with st.expander("Transcript"):
+                            st.write(video["transcript"][:300] + "...")
+                    if enable_seo and video.get("seo_output"):
+                        with st.expander("SEO Output"):
+                            st.write(video["seo_output"])
+                    if enable_images and video.get("image_url"):
+                        st.image(video["image_url"], use_container_width=True)
 
-                    with cols[1]:
-                        st.markdown(f"**Title:** [{video['title']}]({video['url']})")
-                        st.markdown(f"**Views:** {video['views']}  |  **Published:** {video['published_date']}")
-                        if enable_seo and video.get("seo_output"):
-                            with st.expander("SEO Output"):
-                                st.write(video['seo_output'])
-                        if enable_transcript and video.get("transcript"):
-                            snippet = video['transcript'][:300] + "..." if len(video['transcript']) > 300 else video['transcript']
-                            with st.expander("Transcript Snippet"):
-                                st.write(snippet)
-
-                # ---------------- Excel Download ----------------
+                # Excel Export
                 df = pd.DataFrame(video_details)
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, sheet_name="Videos")
+                    df.to_excel(writer, index=False)
                 output.seek(0)
-                st.download_button(
-                    label=f"⬇️ Download Excel",
-                    data=output,
-                    file_name="youtube_videos.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-
-                # ---------------- Images ZIP Download ----------------
-                if enable_images:
-                    image_files = []
-                    for idx, video in enumerate(video_details):
-                        img_url = video.get("image_url")
-                        if img_url and "http" in img_url:
-                            try:
-                                response = requests.get(img_url)
-                                if response.status_code == 200:
-                                    image_files.append((f"{idx+1}_{video['video_id']}.png", response.content))
-                            except Exception as e:
-                                st.write(f"❌ Failed to fetch image: {e}")
-                    if image_files:
-                        zip_buffer = io.BytesIO()
-                        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-                            for filename, data in image_files:
-                                zip_file.writestr(filename, data)
-                        zip_buffer.seek(0)
-                        st.download_button(
-                            label="⬇️ Download All Images as ZIP",
-                            data=zip_buffer,
-                            file_name="youtube_images.zip",
-                            mime="application/zip"
-                        )
+                st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         except HttpError as e:
-            st.error(f"API Error: {e}")
+            st.error(f"YouTube API error: {e}")
