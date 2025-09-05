@@ -6,7 +6,6 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
 import json
 
 # ---------------- Page Setup ----------------
@@ -109,7 +108,6 @@ with tabs[0]:
     openai_api_key = st.text_input("OpenAI API Key (SEO & Images)", key="tab1_openai", type="password")
     channel_id = st.text_input("YouTube Channel ID", key="tab1_channel")
     num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
-
     uploaded_file_tab1 = st.file_uploader("Upload CSV/TXT with Video URLs (optional)", type=["csv", "txt"], key="tab1_file")
 
     enable_seo = st.checkbox("Enable SEO suggestions", key="tab1_seo")
@@ -214,9 +212,142 @@ with tabs[0]:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ---------------- Tabs 2 & 3: Placeholder ----------------
+# ---------------- Tab 2: SEO Topic Analysis ----------------
 with tabs[1]:
-    st.header("SEO Topic Analysis - Coming Soon")
+    st.header("🔍 SEO Topic Analysis")
+    youtube_api_key2 = st.text_input("YouTube API Key", key="tab2_yt", type="password")
+    openai_api_key2 = st.text_input("OpenAI API Key", key="tab2_openai", type="password")
+    topics_input = st.text_input("Enter comma-separated keywords/topics", key="tab2_keywords")
+    uploaded_file_tab2 = st.file_uploader("Upload Excel/CSV with keywords (optional)", type=["xlsx","csv"], key="tab2_file")
+    top_n_videos = st.number_input("Number of top videos to analyze per topic", min_value=1, max_value=20, value=5)
 
+    if st.button("Analyze Topics", key="tab2_btn"):
+        if not youtube_api_key2:
+            st.error("YouTube API Key required")
+        else:
+            try:
+                youtube2 = build("youtube", "v3", developerKey=youtube_api_key2)
+                client2 = OpenAI(api_key=openai_api_key2) if openai_api_key2 else None
+
+                # Prepare topics list
+                topics = []
+                if uploaded_file_tab2:
+                    df_upload = pd.read_excel(uploaded_file_tab2) if uploaded_file_tab2.name.endswith(".xlsx") else pd.read_csv(uploaded_file_tab2)
+                    topics = df_upload.iloc[:,0].astype(str).tolist()
+                else:
+                    topics = [t.strip() for t in topics_input.split(",") if t.strip()]
+
+                all_results = []
+
+                for topic in topics:
+                    st.subheader(f"Keyword/Topic: {topic}")
+                    # Search top videos
+                    search_res = youtube2.search().list(q=topic, part="snippet", maxResults=top_n_videos, order="viewCount", type="video").execute()
+                    video_ids = [item["id"]["videoId"] for item in search_res.get("items", [])]
+                    for vid in video_ids:
+                        info_res = youtube2.videos().list(part="snippet,statistics", id=vid).execute()
+                        snippet = info_res["items"][0]["snippet"]
+                        stats = info_res["items"][0].get("statistics", {})
+                        title = snippet["title"]
+                        description = snippet.get("description","")
+                        tags = snippet.get("tags",[])
+                        views = stats.get("viewCount","0")
+                        hashtags = [w for w in description.split() if w.startswith("#")]
+
+                        seo_output = {}
+                        if client2:
+                            seo_output, _ = generate_seo_and_image_structured(client2, title, description, "")
+
+                        result_item = {
+                            "Topic": topic,
+                            "Video ID": vid,
+                            "Title": title,
+                            "Description": description,
+                            "Tags": ", ".join(tags),
+                            "Hashtags": ", ".join(hashtags),
+                            "Views": views,
+                            "SEO Suggestions": seo_output
+                        }
+                        all_results.append(result_item)
+
+                        st.write(f"**Title:** {title} | **Views:** {views}")
+                        st.write(f"**Description:** {description[:200]}...")
+                        st.write(f"**Tags:** {', '.join(tags)}")
+                        st.write(f"**Hashtags:** {', '.join(hashtags)}")
+                        if seo_output:
+                            st.write(f"**SEO Optimized Title:** {seo_output.get('Optimized Title','')}")
+                            st.write(f"**SEO Keywords:** {', '.join(seo_output.get('Suggested Keywords',[]))}")
+
+                # Export Excel
+                if all_results:
+                    df_all = pd.DataFrame(all_results)
+                    df_all['Optimized Title'] = df_all['SEO Suggestions'].apply(lambda x: x.get('Optimized Title') if isinstance(x, dict) else "")
+                    df_all['Optimized Description'] = df_all['SEO Suggestions'].apply(lambda x: x.get('Optimized Description') if isinstance(x, dict) else "")
+                    df_all['Suggested Hashtags'] = df_all['SEO Suggestions'].apply(lambda x: ", ".join(x.get('Suggested Hashtags', [])) if isinstance(x, dict) else "")
+                    df_all['Suggested Keywords'] = df_all['SEO Suggestions'].apply(lambda x: ", ".join(x.get('Suggested Keywords', [])) if isinstance(x, dict) else "")
+
+                    output2 = BytesIO()
+                    with pd.ExcelWriter(output2, engine="xlsxwriter") as writer:
+                        df_all.to_excel(writer, index=False, sheet_name="SEO_Topics")
+                    output2.seek(0)
+                    st.download_button("📥 Download SEO Topic Analysis", data=output2.getvalue(),
+                                       file_name="seo_topic_analysis.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+# ---------------- Tab 3: Trending Topic Finder ----------------
 with tabs[2]:
-    st.header("Trending Topic Finder - Coming Soon")
+    st.header("📈 Trending Topic Finder")
+    youtube_api_key3 = st.text_input("YouTube API Key", key="tab3_yt", type="password")
+    openai_api_key3 = st.text_input("OpenAI API Key", key="tab3_openai", type="password")
+    topics_input3 = st.text_input("Enter comma-separated topics", key="tab3_keywords")
+    uploaded_file_tab3 = st.file_uploader("Upload Excel/CSV with topics (optional)", type=["xlsx","csv"], key="tab3_file")
+    top_videos_tab3 = st.number_input("Number of top videos per topic", min_value=1, max_value=20, value=5)
+
+    if st.button("Find Trending Topics", key="tab3_btn"):
+        if not youtube_api_key3:
+            st.error("YouTube API Key required")
+        else:
+            try:
+                youtube3 = build("youtube", "v3", developerKey=youtube_api_key3)
+                client3 = OpenAI(api_key=openai_api_key3) if openai_api_key3 else None
+
+                topics3 = []
+                if uploaded_file_tab3:
+                    df_upload3 = pd.read_excel(uploaded_file_tab3) if uploaded_file_tab3.name.endswith(".xlsx") else pd.read_csv(uploaded_file_tab3)
+                    topics3 = df_upload3.iloc[:,0].astype(str).tolist()
+                else:
+                    topics3 = [t.strip() for t in topics_input3.split(",") if t.strip()]
+
+                all_trends = []
+
+                for topic in topics3:
+                    st.subheader(f"Analyzing Topic: {topic}")
+                    search_res = youtube3.search().list(q=topic, part="snippet", maxResults=top_videos_tab3, order="viewCount", type="video").execute()
+                    for item in search_res.get("items", []):
+                        vid = item["id"]["videoId"]
+                        snippet = item["snippet"]
+                        title = snippet["title"]
+                        desc = snippet.get("description","")
+                        result_item = {
+                            "Topic": topic,
+                            "Video ID": vid,
+                            "Title": title,
+                            "Description": desc
+                        }
+                        all_trends.append(result_item)
+                        st.write(f"**Title:** {title} | **Description:** {desc[:200]}...")
+
+                if all_trends:
+                    df_trends = pd.DataFrame(all_trends)
+                    output3 = BytesIO()
+                    with pd.ExcelWriter(output3, engine="xlsxwriter") as writer:
+                        df_trends.to_excel(writer, index=False, sheet_name="Trending_Topics")
+                    output3.seek(0)
+                    st.download_button("📥 Download Trending Topics", data=output3.getvalue(),
+                                       file_name="trending_topics.xlsx",
+                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            except Exception as e:
+                st.error(f"Error: {e}")
