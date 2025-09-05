@@ -2,20 +2,14 @@ import streamlit as st
 from googleapiclient.discovery import build
 import pandas as pd
 from io import BytesIO
-import time
-from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from openai import OpenAI
-import os
 import re
-import requests
-import zipfile
-import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Video Exporter + SEO + Transcript + Images", layout="centered")
-st.title("📊 YouTube Video Exporter + SEO + Transcript + Images (Cloud-Compatible)")
+st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
 st.markdown(
     "Export videos from your YouTube channel, single video, or uploaded list. "
     "Optionally generate SEO-optimized titles/descriptions, transcripts, and images based on video titles."
@@ -34,7 +28,7 @@ with st.form(key="form"):
         channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
         batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
         start_index = (batch_number - 1) * 500
-        num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=500, value=50, step=1)
+        num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
     elif mode == "Single Video":
         video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
     else:
@@ -92,33 +86,22 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-def get_top_video_tags(youtube, search_query, max_results=20):
+def fetch_transcript(video_id):
     try:
-        search_res = youtube.search().list(
-            q=search_query, part="snippet", type="video", order="viewCount", maxResults=max_results
-        ).execute()
-        video_ids = [item["id"]["videoId"] for item in search_res["items"]]
-        tags = []
-        for vid in video_ids:
-            res = youtube.videos().list(part="snippet", id=vid).execute()
-            if res["items"]:
-                tags.extend(res["items"][0]["snippet"].get("tags", []))
-        tag_freq = pd.Series(tags).value_counts()
-        return tag_freq.index.tolist()[:20]
-    except:
-        return []
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        return " ".join([seg["text"] for seg in transcript])
+    except (TranscriptsDisabled, NoTranscriptFound):
+        return "Transcript not found"
 
-def generate_seo_tags(video, top_tags=None):
+def generate_seo_tags(video):
     if not client:
         return "OpenAI API key missing"
-    tags_string = ", ".join(top_tags) if top_tags else ""
     prompt = f"""
     You are a YouTube SEO expert. Video info:
 
     Title: {video['title']}
     Description: {video['description']}
     Views: {video['views']}
-    Top tags: {tags_string}
 
     Generate:
     - SEO title (≤70 chars)
@@ -134,13 +117,6 @@ def generate_seo_tags(video, top_tags=None):
         return response.choices[0].message.content
     except:
         return "Error generating SEO"
-
-def fetch_transcript(video_id):
-    try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        return " ".join([seg["text"] for seg in transcript])
-    except (TranscriptsDisabled, NoTranscriptFound):
-        return "Transcript not found"
 
 def generate_image(prompt):
     if not client:
@@ -160,14 +136,14 @@ def extract_video_ids_from_urls(file):
     urls = content.splitlines()
     ids = []
     for url in urls:
-        match = re.search(r"(?:v=|youtu.be/)([\w-]{11})", url)
+        match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", url)
         if match:
             ids.append(match.group(1))
     return ids
 
-def process_video(video, top_tags, enable_seo, enable_transcript, enable_images):
+def process_video(video):
     if enable_seo:
-        video["seo_output"] = generate_seo_tags(video, top_tags)
+        video["seo_output"] = generate_seo_tags(video)
     if enable_transcript:
         video["transcript"] = fetch_transcript(video["video_id"])
     if enable_images:
@@ -181,7 +157,7 @@ if submit:
     else:
         try:
             youtube = build("youtube", "v3", developerKey=yt_api_key)
-            top_tags = get_top_video_tags(youtube, seo_topic) if seo_topic else []
+            videos_to_process = []
 
             if mode == "Batch Mode":
                 playlist_id = get_upload_playlist(youtube, channel_id)
@@ -196,19 +172,18 @@ if submit:
                 video_ids = extract_video_ids_from_urls(uploaded_file)
                 videos_to_process = [get_video_info(youtube, vid) for vid in video_ids]
 
-            # ---------------- Parallel Processing ----------------
             progress_bar = st.progress(0)
             video_details = []
             total_videos = len(videos_to_process)
 
+            from concurrent.futures import ThreadPoolExecutor, as_completed
             with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = [executor.submit(process_video, v, top_tags, enable_seo, enable_transcript, enable_images)
-                           for v in videos_to_process]
+                futures = [executor.submit(process_video, v) for v in videos_to_process]
                 for i, future in enumerate(as_completed(futures), 1):
                     video_details.append(future.result())
                     progress_bar.progress(i / total_videos)
 
-            # ---------------- Display & Download ----------------
+            # Display & Download
             if video_details:
                 for video in video_details:
                     st.markdown("---")
@@ -223,7 +198,6 @@ if submit:
                     if enable_images and video.get("image_url"):
                         st.image(video["image_url"], use_container_width=True)
 
-                # Excel Export
                 df = pd.DataFrame(video_details)
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -231,5 +205,5 @@ if submit:
                 output.seek(0)
                 st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-        except HttpError as e:
-            st.error(f"YouTube API error: {e}")
+        except Exception as e:
+            st.error(f"Error: {e}")
