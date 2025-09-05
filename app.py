@@ -13,6 +13,7 @@ import tempfile
 import requests
 import zipfile
 import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Video Exporter + SEO + Transcript + Images", layout="centered")
@@ -199,7 +200,21 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
-# ---------------- Fetch Logic ----------------
+def process_video(video, top_tags, enable_seo, enable_transcript, enable_images):
+    try:
+        if enable_seo:
+            video["seo_output"] = generate_seo_tags(video, top_tags)
+        if enable_transcript:
+            video["transcript"] = fetch_transcript(video["video_id"])
+        if enable_images:
+            img_url, err = generate_image(video["title"])
+            video["image_url"] = img_url if img_url else err
+        return video
+    except Exception as e:
+        video["error"] = f"Processing error: {str(e)}"
+        return video
+
+# ---------------- Fetch Logic with Parallel Processing ----------------
 if submit:
     if not yt_api_key:
         st.error("❌ Please enter your YouTube API Key.")
@@ -214,70 +229,44 @@ if submit:
 
             video_details = []
 
-            # ---------------- Mode: Batch ----------------
+            # ---------------- Get Video List ----------------
             if mode == "Batch Mode":
                 if not channel_id:
                     st.error("❌ Please enter Channel ID.")
-                else:
-                    try:
-                        playlist_id = get_upload_playlist(youtube, channel_id)
-                    except ValueError as e:
-                        st.error(str(e))
-                        st.stop()
-                    with st.spinner("📡 Fetching videos..."):
-                        video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
-                        video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
-                        selected_batch = video_meta_sorted[start_index:start_index + num_videos]
-                        for v in selected_batch:
-                            info = get_video_info(youtube, v["video_id"])
-                            if enable_seo:
-                                info["seo_output"] = generate_seo_tags(info, top_tags)
-                                time.sleep(5)
-                            if enable_transcript:
-                                info["transcript"] = fetch_transcript(v["video_id"])
-                            if enable_images:
-                                img_url, err = generate_image(info["title"])
-                                info["image_url"] = img_url if img_url else err
-                            video_details.append(info)
+                    st.stop()
+                try:
+                    playlist_id = get_upload_playlist(youtube, channel_id)
+                except ValueError as e:
+                    st.error(str(e))
+                    st.stop()
+                video_meta = get_video_ids(youtube, playlist_id, max_videos=start_index + num_videos)
+                video_meta_sorted = sorted(video_meta, key=lambda x: x["published_at"], reverse=True)
+                selected_batch = video_meta_sorted[start_index:start_index + num_videos]
+                videos_to_process = [get_video_info(youtube, v["video_id"]) for v in selected_batch]
 
-            # ---------------- Mode: Single ----------------
             elif mode == "Single Video":
                 if not video_id_input:
                     st.error("❌ Please enter a Video ID.")
-                else:
-                    with st.spinner("🔍 Fetching video..."):
-                        info = get_video_info(youtube, video_id_input)
-                        if "error" in info:
-                            st.error(f"❌ {info['error']}")
-                        else:
-                            if enable_seo:
-                                info["seo_output"] = generate_seo_tags(info, top_tags)
-                                time.sleep(5)
-                            if enable_transcript:
-                                info["transcript"] = fetch_transcript(video_id_input)
-                            if enable_images:
-                                img_url, err = generate_image(info["title"])
-                                info["image_url"] = img_url if img_url else err
-                            video_details.append(info)
+                    st.stop()
+                videos_to_process = [get_video_info(youtube, video_id_input)]
 
-            # ---------------- Mode: Upload ----------------
             elif mode == "Upload URLs":
                 if not uploaded_file:
                     st.error("❌ Please upload a file with video URLs.")
-                else:
-                    video_ids = extract_video_ids_from_urls(uploaded_file)
-                    with st.spinner("📄 Processing uploaded video URLs..."):
-                        for vid in video_ids:
-                            info = get_video_info(youtube, vid)
-                            if enable_seo:
-                                info["seo_output"] = generate_seo_tags(info, top_tags)
-                                time.sleep(5)
-                            if enable_transcript:
-                                info["transcript"] = fetch_transcript(vid)
-                            if enable_images:
-                                img_url, err = generate_image(info["title"])
-                                info["image_url"] = img_url if img_url else err
-                            video_details.append(info)
+                    st.stop()
+                video_ids = extract_video_ids_from_urls(uploaded_file)
+                videos_to_process = [get_video_info(youtube, vid) for vid in video_ids]
+
+            # ---------------- Parallel Processing ----------------
+            progress_bar = st.progress(0)
+            total_videos = len(videos_to_process)
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [executor.submit(process_video, v, top_tags, enable_seo, enable_transcript, enable_images)
+                           for v in videos_to_process]
+                for i, future in enumerate(as_completed(futures), 1):
+                    video_details.append(future.result())
+                    progress_bar.progress(i / total_videos)
 
             # ---------------- Display Preview Cards ----------------
             if video_details:
@@ -288,9 +277,17 @@ if submit:
                     with cols[0]:
                         img_url = video.get("image_url")
                         if img_url and "http" in img_url:
-                            st.image(img_url, use_column_width=True)
+                            try:
+                                response = requests.get(img_url)
+                                if response.status_code == 200:
+                                    st.image(response.content, use_container_width=True)
+                                else:
+                                    st.write("❌ Failed to load image")
+                            except Exception as e:
+                                st.write(f"❌ Image load error: {e}")
                         else:
-                            st.write(img_url)
+                            st.write("No image available")
+
                     with cols[1]:
                         st.markdown(f"**Title:** [{video['title']}]({video['url']})")
                         st.markdown(f"**Views:** {video['views']}  |  **Published:** {video['published_date']}")
