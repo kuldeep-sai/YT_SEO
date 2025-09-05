@@ -44,14 +44,18 @@ with tab1:
 
 # ---------------- Tab 2: SEO Topic Analysis ----------------
 with tab2:
-    st.markdown("### 🔍 SEO Topic Analysis (Top 10 Videos)")
+    st.markdown("### 🔍 SEO Topic Analysis (Top Videos)")
 
     # Input Keys for Tab 2
     yt_api_key_seo = st.text_input("🔑 YouTube API Key for SEO Analysis (Tab 2)", type="password")
     openai_key_seo = st.text_input("🤖 OpenAI API Key for SEO Analysis (Tab 2)", type="password")
 
     seo_topic_input = st.text_input("📈 Enter Topic/Keyword for SEO Analysis (e.g. Python Tutorials)")
-    analyze_seo = st.button("Analyze Top 10 Videos")
+    
+    # Configurable number of top videos
+    top_video_count = st.number_input("🎬 Number of top videos to analyze", min_value=1, max_value=50, value=10, step=1)
+    
+    analyze_seo = st.button("Analyze Videos")
 
 # ---------------- OpenAI Client for Tab 1 ----------------
 effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
@@ -223,11 +227,10 @@ if 'submit' in locals() and submit:
                 output.seek(0)
                 st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx",
                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ---------------- Tab 2: SEO Topic Analysis ----------------
+# ---------------- Tab 2: SEO Topic Analysis Logic ----------------
 if 'analyze_seo' in locals() and analyze_seo:
     if not yt_api_key_seo or not openai_key_seo:
         st.error("Please provide both YouTube and OpenAI API keys for SEO analysis")
@@ -238,15 +241,14 @@ if 'analyze_seo' in locals() and analyze_seo:
             youtube_seo = build("youtube", "v3", developerKey=yt_api_key_seo)
             openai_seo_client = OpenAI(api_key=openai_key_seo)
 
-            st.info(f"Fetching top 10 videos for topic: '{seo_topic_input}'")
+            st.info(f"Fetching top {top_video_count} videos for topic: '{seo_topic_input}'")
             
-            # Fetch top 10 videos
             search_res = youtube_seo.search().list(
                 q=seo_topic_input,
                 part="snippet",
                 type="video",
                 order="viewCount",
-                maxResults=10
+                maxResults=top_video_count
             ).execute()
             
             top_videos = []
@@ -274,7 +276,6 @@ if 'analyze_seo' in locals() and analyze_seo:
                     st.markdown(f"**Description:** {video['description'][:300]}...")
                     st.markdown(f"**Tags:** {video['tags'] or 'N/A'}")
                     
-                    # Generate SEO suggestions
                     prompt = f"""
                     You are a YouTube SEO expert. Video info:
 
