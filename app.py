@@ -46,14 +46,13 @@ with tab1:
 with tab2:
     st.markdown("### 🔍 SEO Topic Analysis (Top Videos)")
 
-    # Input Keys for Tab 2
     yt_api_key_seo = st.text_input("🔑 YouTube API Key for SEO Analysis (Tab 2)", type="password")
     openai_key_seo = st.text_input("🤖 OpenAI API Key for SEO Analysis (Tab 2)", type="password")
 
-    seo_topic_input = st.text_input("📈 Enter Topic/Keyword for SEO Analysis (e.g. Python Tutorials)")
-    
-    # Configurable number of top videos
-    top_video_count = st.number_input("🎬 Number of top videos to analyze", min_value=1, max_value=50, value=10, step=1)
+    seo_topics_input = st.text_input(
+        "📈 Enter Topics/Keywords for SEO Analysis (comma separated, e.g. Python, AI, SEO)"
+    )
+    top_video_count = st.number_input("🎬 Number of top videos to analyze per topic", min_value=1, max_value=50, value=10, step=1)
     
     analyze_seo = st.button("Analyze Videos")
 
@@ -234,41 +233,44 @@ if 'submit' in locals() and submit:
 if 'analyze_seo' in locals() and analyze_seo:
     if not yt_api_key_seo or not openai_key_seo:
         st.error("Please provide both YouTube and OpenAI API keys for SEO analysis")
-    elif not seo_topic_input:
-        st.warning("Please enter a topic to analyze")
+    elif not seo_topics_input:
+        st.warning("Please enter at least one topic to analyze")
     else:
+        topics = [t.strip() for t in seo_topics_input.split(",") if t.strip()]
         try:
             youtube_seo = build("youtube", "v3", developerKey=yt_api_key_seo)
             openai_seo_client = OpenAI(api_key=openai_key_seo)
 
-            st.info(f"Fetching top {top_video_count} videos for topic: '{seo_topic_input}'")
-            
-            search_res = youtube_seo.search().list(
-                q=seo_topic_input,
-                part="snippet",
-                type="video",
-                order="viewCount",
-                maxResults=top_video_count
-            ).execute()
-            
-            top_videos = []
-            for item in search_res.get("items", []):
-                vid_id = item["id"]["videoId"]
-                vid_info = youtube_seo.videos().list(part="snippet,statistics", id=vid_id).execute()
-                if vid_info["items"]:
-                    info = vid_info["items"][0]
-                    top_videos.append({
-                        "video_id": vid_id,
-                        "title": info["snippet"]["title"],
-                        "description": info["snippet"]["description"],
-                        "tags": ", ".join(info["snippet"].get("tags", [])),
-                        "views": int(info["statistics"].get("viewCount", 0)),
-                        "url": f"https://www.youtube.com/watch?v={vid_id}"
-                    })
+            for topic in topics:
+                st.info(f"Fetching top {top_video_count} videos for topic: '{topic}'")
+                
+                search_res = youtube_seo.search().list(
+                    q=topic,
+                    part="snippet",
+                    type="video",
+                    order="viewCount",
+                    maxResults=top_video_count
+                ).execute()
+                
+                top_videos = []
+                for item in search_res.get("items", []):
+                    vid_id = item["id"]["videoId"]
+                    vid_info = youtube_seo.videos().list(part="snippet,statistics", id=vid_id).execute()
+                    if vid_info["items"]:
+                        info = vid_info["items"][0]
+                        top_videos.append({
+                            "video_id": vid_id,
+                            "title": info["snippet"]["title"],
+                            "description": info["snippet"]["description"],
+                            "tags": ", ".join(info["snippet"].get("tags", [])),
+                            "views": int(info["statistics"].get("viewCount", 0)),
+                            "url": f"https://www.youtube.com/watch?v={vid_id}"
+                        })
 
-            if not top_videos:
-                st.warning("No videos found for this topic")
-            else:
+                if not top_videos:
+                    st.warning(f"No videos found for topic: '{topic}'")
+                    continue
+
                 for idx, video in enumerate(top_videos, 1):
                     st.markdown("---")
                     st.markdown(f"### {idx}. [{video['title']}]({video['url']})")
@@ -293,6 +295,3 @@ if 'analyze_seo' in locals() and analyze_seo:
                         messages=[{"role": "user", "content": prompt}]
                     )
                     st.write(seo_output.choices[0].message.content)
-
-        except Exception as e:
-            st.error(f"Error: {e}")
