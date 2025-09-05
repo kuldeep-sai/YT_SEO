@@ -44,14 +44,19 @@ with tab1:
 
 # ---------------- Tab 2: SEO Topic Analysis ----------------
 with tab2:
-    st.markdown("### 🔍 Analyze Top-Ranking SEO Tags for a Topic")
-    seo_topic_input = st.text_input("📈 Enter Topic for SEO Analysis (e.g. Python Tutorials)")
-    analyze_seo = st.button("Analyze SEO Tags")
+    st.markdown("### 🔍 SEO Topic Analysis (Top 10 Videos)")
 
-# ---------------- OpenAI Client ----------------
+    # Input Keys for Tab 2
+    yt_api_key_seo = st.text_input("🔑 YouTube API Key for SEO Analysis (Tab 2)", type="password")
+    openai_key_seo = st.text_input("🤖 OpenAI API Key for SEO Analysis (Tab 2)", type="password")
+
+    seo_topic_input = st.text_input("📈 Enter Topic/Keyword for SEO Analysis (e.g. Python Tutorials)")
+    analyze_seo = st.button("Analyze Top 10 Videos")
+
+# ---------------- OpenAI Client for Tab 1 ----------------
 effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
 client = OpenAI(api_key=effective_openai_key) if effective_openai_key else None
-if enable_images and not client:
+if 'enable_images' in locals() and enable_images and not client:
     st.warning("⚠️ OpenAI API key missing. Image generation will not work.")
 
 # ---------------- Helper Functions ----------------
@@ -166,7 +171,7 @@ def process_video(video):
     return video
 
 # ---------------- Tab 1: Fetch Videos ----------------
-if submit:
+if 'submit' in locals() and submit:
     if not yt_api_key:
         st.error("YouTube API Key required")
     else:
@@ -223,22 +228,70 @@ if submit:
             st.error(f"Error: {e}")
 
 # ---------------- Tab 2: SEO Topic Analysis ----------------
-if analyze_seo:
-    if not client:
-        st.error("OpenAI API key is required for SEO analysis")
+if 'analyze_seo' in locals() and analyze_seo:
+    if not yt_api_key_seo or not openai_key_seo:
+        st.error("Please provide both YouTube and OpenAI API keys for SEO analysis")
     elif not seo_topic_input:
         st.warning("Please enter a topic to analyze")
     else:
-        # Example simple analysis: generate top tags for the topic
         try:
-            st.info(f"Analyzing SEO for topic: {seo_topic_input}")
-            prompt = f"List 20 trending SEO keywords for YouTube videos on the topic: {seo_topic_input}"
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            tags_output = response.choices[0].message.content
-            st.success("✅ SEO Keywords:")
-            st.write(tags_output)
+            youtube_seo = build("youtube", "v3", developerKey=yt_api_key_seo)
+            openai_seo_client = OpenAI(api_key=openai_key_seo)
+
+            st.info(f"Fetching top 10 videos for topic: '{seo_topic_input}'")
+            
+            # Fetch top 10 videos
+            search_res = youtube_seo.search().list(
+                q=seo_topic_input,
+                part="snippet",
+                type="video",
+                order="viewCount",
+                maxResults=10
+            ).execute()
+            
+            top_videos = []
+            for item in search_res.get("items", []):
+                vid_id = item["id"]["videoId"]
+                vid_info = youtube_seo.videos().list(part="snippet,statistics", id=vid_id).execute()
+                if vid_info["items"]:
+                    info = vid_info["items"][0]
+                    top_videos.append({
+                        "video_id": vid_id,
+                        "title": info["snippet"]["title"],
+                        "description": info["snippet"]["description"],
+                        "tags": ", ".join(info["snippet"].get("tags", [])),
+                        "views": int(info["statistics"].get("viewCount", 0)),
+                        "url": f"https://www.youtube.com/watch?v={vid_id}"
+                    })
+
+            if not top_videos:
+                st.warning("No videos found for this topic")
+            else:
+                for idx, video in enumerate(top_videos, 1):
+                    st.markdown("---")
+                    st.markdown(f"### {idx}. [{video['title']}]({video['url']})")
+                    st.markdown(f"**Views:** {video['views']}")
+                    st.markdown(f"**Description:** {video['description'][:300]}...")
+                    st.markdown(f"**Tags:** {video['tags'] or 'N/A'}")
+                    
+                    # Generate SEO suggestions
+                    prompt = f"""
+                    You are a YouTube SEO expert. Video info:
+
+                    Title: {video['title']}
+                    Description: {video['description']}
+                    Tags: {video['tags']}
+
+                    Suggest:
+                    - 10 SEO-optimized hashtags
+                    - 10 long-tail keywords
+                    - A better SEO-friendly title (if needed)
+                    """
+                    seo_output = openai_seo_client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    st.write(seo_output.choices[0].message.content)
+
         except Exception as e:
-            st.error(f"Error generating SEO tags: {e}")
+            st.error(f"Error: {e}")
