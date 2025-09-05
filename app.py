@@ -8,9 +8,11 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import os
 import re
+import yt_dlp
+import tempfile
 
 # Page setup
-st.set_page_config(page_title="YouTube Channel Video Exporter", layout="centered")
+st.set_page_config(page_title="YouTube Channel Video Exporter + SEO + Transcript", layout="centered")
 st.title("📊 YouTube Channel Video Exporter + SEO Generator + Transcript")
 
 st.markdown("Export videos from your YouTube channel, a single video, or from a list of video URLs. Optionally generate SEO-optimized titles, descriptions, keywords, and transcripts.")
@@ -21,7 +23,7 @@ mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"
 # Input form
 with st.form(key="form"):
     yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-    openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO tagging)", type="password")
+    openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO & Whisper)", type="password")
     seo_topic = st.text_input("📈 (Optional) Topic for analyzing top-ranking SEO tags")
 
     if mode == "Batch Mode":
@@ -105,7 +107,6 @@ def get_top_video_tags(youtube, search_query, max_results=20):
 def generate_seo_tags(video, top_tags=None):
     if not client:
         return "❌ OpenAI API key is missing or not set."
-
     tags_string = ", ".join(top_tags) if top_tags else ""
     prompt = f"""
     You are an expert YouTube SEO optimizer. Given this video metadata:
@@ -132,14 +133,45 @@ def generate_seo_tags(video, top_tags=None):
     except Exception as e:
         return f"OpenAI Error: {e}"
 
+# Updated transcript function with Whisper fallback
 def fetch_transcript(video_id):
+    # Try YouTube transcript API first
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "hi"])
         return " ".join([seg["text"] for seg in transcript])
     except (TranscriptsDisabled, NoTranscriptFound):
-        return "Transcript not found"
-    except Exception:
-        return "Transcript not found"
+        pass  # fallback to Whisper
+    except Exception as e:
+        return f"⚠️ Transcript API error: {str(e)}"
+
+    # Fallback: Download audio + transcribe with Whisper
+    if not client:
+        return "❌ OpenAI API key is required for Whisper fallback."
+
+    try:
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = f"{tmpdir}/{video_id}.mp3"
+
+            # Download audio only
+            ydl_opts = {
+                "format": "bestaudio/best",
+                "outtmpl": audio_path,
+                "quiet": True,
+                "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}],
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            # Send to OpenAI Whisper
+            with open(audio_path, "rb") as f:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f
+                )
+            return transcript.text
+    except Exception as e:
+        return f"❌ Whisper fallback failed: {str(e)}"
 
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
