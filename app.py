@@ -6,12 +6,17 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
+import time
 
 # ---------------- Page Setup ----------------
-st.set_page_config(page_title="YouTube Toolkit", layout="wide")
-st.title("📊 YouTube Video Toolkit: Export + SEO + Images")
+st.set_page_config(page_title="YouTube Exporter + SEO + Images", layout="centered")
+st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
+st.markdown(
+    "Export videos from YouTube channel, single video, or uploaded list. "
+    "Optionally generate SEO titles/descriptions, transcripts, and images from video titles."
+)
 
+# ---------------- Tabs ----------------
 tabs = st.tabs(["Video Export", "SEO Topic Analysis"])
 
 # ---------------- Helper Functions ----------------
@@ -21,7 +26,7 @@ def get_upload_playlist(youtube, channel_id):
         raise ValueError(f"No channel found for ID: {channel_id}")
     return data["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-def get_videos_from_playlist(youtube, playlist_id, max_videos=50):
+def get_video_ids(youtube, playlist_id, max_videos=1000):
     videos = []
     next_token = None
     while len(videos) < max_videos:
@@ -31,13 +36,33 @@ def get_videos_from_playlist(youtube, playlist_id, max_videos=50):
             maxResults=min(50, max_videos - len(videos)),
             pageToken=next_token
         ).execute()
-        videos.extend(res.get("items", []))
+        for item in res["items"]:
+            videos.append({
+                "video_id": item["contentDetails"]["videoId"],
+                "published_at": item["contentDetails"].get("videoPublishedAt") or item["snippet"]["publishedAt"]
+            })
         next_token = res.get("nextPageToken")
         if not next_token:
             break
-    return videos[:max_videos]
+    return videos
 
-def fetch_video_transcript(video_id):
+def get_video_info(youtube, video_id):
+    res = youtube.videos().list(part="snippet,statistics", id=video_id).execute()
+    if not res["items"]:
+        return {"video_id": video_id, "error": "Video not found"}
+    item = res["items"][0]
+    views = int(item["statistics"].get("viewCount", 0))
+    return {
+        "video_id": video_id,
+        "title": item["snippet"]["title"],
+        "description": item["snippet"]["description"],
+        "tags": ", ".join(item["snippet"].get("tags", [])),
+        "views": views,
+        "published_date": item["snippet"]["publishedAt"],
+        "url": f"https://www.youtube.com/watch?v={video_id}"
+    }
+
+def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         transcript = transcript_list.find_transcript(['en']).fetch()
@@ -47,49 +72,44 @@ def fetch_video_transcript(video_id):
     except Exception:
         return "Transcript not found"
 
-def generate_seo_and_image_structured(client, title, description, transcript):
-    seo_prompt = f"""
-    You are a YouTube SEO expert. Generate SEO-friendly suggestions for this video.
-    Respond in JSON format exactly as below:
+def generate_seo_tags(client, video):
+    if not client:
+        return "OpenAI API key missing"
+    prompt = f"""
+    You are a YouTube SEO expert. Video info:
 
-    {{
-        "Optimized Title": "...",
-        "Optimized Description": "...",
-        "Suggested Hashtags": ["#hashtag1", "#hashtag2"],
-        "Suggested Keywords": ["keyword1", "keyword2"]
-    }}
+    Title: {video['title']}
+    Description: {video['description']}
+    Views: {video['views']}
 
-    Video info:
-    Title: {title}
-    Description: {description}
-    Transcript: {transcript[:1000]}...
+    Generate:
+    - SEO title (≤70 chars)
+    - 150-word description
+    - 10 hashtags
+    - 10 long-tail keywords
     """
-    seo_output = {"Optimized Title": "", "Optimized Description": "", 
-                  "Suggested Hashtags": [], "Suggested Keywords": []}
-    image_url = None
-
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": seo_prompt}],
-            temperature=0.7
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}]
         )
-        seo_output = json.loads(response.choices[0].message.content)
+        return response.choices[0].message.content
     except Exception as e:
-        seo_output = {"Optimized Title": "Error", "Optimized Description": f"{e}",
-                      "Suggested Hashtags": [], "Suggested Keywords": []}
+        return f"Error generating SEO: {e}"
 
+def generate_image(client, prompt):
+    if not client:
+        return None
     try:
-        img_resp = client.images.generate(
+        response = client.images.generate(
             model="gpt-image-1",
-            prompt=f"Create an engaging YouTube thumbnail for video: {title}",
+            prompt=f"Thumbnail for: {prompt}",
             size="512x512"
         )
-        image_url = img_resp.data[0].url
-    except Exception:
-        image_url = None
-
-    return seo_output, image_url
+        return response.data[0].url
+    except Exception as e:
+        st.warning(f"Image generation failed for '{prompt}': {e}")
+        return None
 
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
@@ -101,14 +121,30 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
+def process_video(video, client, enable_seo, enable_transcript, enable_images):
+    if enable_seo:
+        video["seo_output"] = generate_seo_tags(client, video)
+    if enable_transcript:
+        video["transcript"] = fetch_transcript(video["video_id"])
+    if enable_images:
+        video["image_url"] = generate_image(client, video["title"])
+    return video
+
 # ---------------- Tab 1: Video Export ----------------
 with tabs[0]:
     st.header("🎥 Video Export + SEO + Images + Transcript")
     youtube_api_key = st.text_input("YouTube API Key", key="tab1_yt", type="password")
     openai_api_key = st.text_input("OpenAI API Key (SEO & Images)", key="tab1_openai", type="password")
-    channel_id = st.text_input("YouTube Channel ID", key="tab1_channel")
-    num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
-    uploaded_file_tab1 = st.file_uploader("Upload CSV/TXT with Video URLs (optional)", type=["csv", "txt"], key="tab1_file")
+    
+    mode_tab1 = st.radio("Select Mode", ["Single Video", "Batch Mode", "Upload URLs"], key="tab1_mode")
+    
+    if mode_tab1 == "Single Video":
+        video_id_input = st.text_input("Enter Video ID", key="tab1_single_vid")
+    elif mode_tab1 == "Batch Mode":
+        channel_id = st.text_input("YouTube Channel ID", key="tab1_channel")
+        num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
+    else:
+        uploaded_file_tab1 = st.file_uploader("Upload CSV/TXT with Video URLs", type=["csv", "txt"], key="tab1_file")
 
     enable_seo = st.checkbox("Enable SEO suggestions", key="tab1_seo")
     enable_images = st.checkbox("Enable AI Thumbnail", key="tab1_img")
@@ -118,181 +154,94 @@ with tabs[0]:
         if not youtube_api_key:
             st.error("YouTube API Key required")
         else:
-            try:
-                youtube = build("youtube", "v3", developerKey=youtube_api_key)
-                client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+            youtube = build("youtube", "v3", developerKey=youtube_api_key)
+            client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+            videos_to_process = []
 
-                # Collect videos
-                videos_to_process = []
+            if mode_tab1 == "Single Video":
+                if not video_id_input:
+                    st.error("Enter Video ID")
+                else:
+                    videos_to_process = [get_video_info(youtube, video_id_input)]
+            elif mode_tab1 == "Batch Mode":
+                playlist_id = get_upload_playlist(youtube, channel_id)
+                videos_meta = get_video_ids(youtube, playlist_id, max_videos=num_videos)
+                videos_to_process = [get_video_info(youtube, v["video_id"]) for v in videos_meta[:num_videos]]
+            else:
                 if uploaded_file_tab1:
                     video_ids = extract_video_ids_from_urls(uploaded_file_tab1)
-                    videos_to_process = [{"contentDetails": {"videoId": vid}} for vid in video_ids]
-                else:
-                    playlist_id = get_upload_playlist(youtube, channel_id)
-                    videos_to_process = get_videos_from_playlist(youtube, playlist_id, max_videos=num_videos)
+                    videos_to_process = [get_video_info(youtube, vid) for vid in video_ids]
 
-                results = []
-                progress_bar = st.progress(0)
-                total_videos = len(videos_to_process)
+            video_details = []
+            for v in videos_to_process:
+                video_details.append(process_video(v, client, enable_seo, enable_transcript, enable_images))
 
-                def process_video_item(v):
-                    vid = v["contentDetails"]["videoId"]
-                    info_res = youtube.videos().list(part="snippet,statistics", id=vid).execute()
-                    snippet = info_res["items"][0]["snippet"]
-                    stats = info_res["items"][0].get("statistics", {})
-                    title = snippet["title"]
-                    description = snippet.get("description", "")
-                    tags = snippet.get("tags", [])
-                    views = stats.get("viewCount", "0")
-                    published_date = snippet.get("publishedAt", "N/A")
-                    transcript = fetch_video_transcript(vid)
-                    hashtags = [w for w in description.split() if w.startswith("#")]
+            for video in video_details:
+                st.markdown("---")
+                st.markdown(f"**Title:** [{video['title']}]({video['url']})")
+                st.markdown(f"**Views:** {video['views']} | **Published:** {video['published_date']}")
+                st.markdown(f"**Current Description:** {video['description']}")
+                st.markdown(f"**Tags:** {video['tags']}")
+                if enable_transcript and video.get("transcript"):
+                    with st.expander("Transcript"):
+                        st.write(video["transcript"][:300] + "...")
+                if enable_seo and video.get("seo_output"):
+                    with st.expander("SEO Output"):
+                        st.write(video["seo_output"])
+                if enable_images and video.get("image_url"):
+                    st.image(video["image_url"], use_container_width=True)
 
-                    seo_output, image_url = ({}, None)
-                    if client and enable_seo:
-                        seo_output, image_url = generate_seo_and_image_structured(client, title, description, transcript)
-
-                    return {
-                        "Video ID": vid,
-                        "Current Title": title,
-                        "Current Description": description,
-                        "Tags": ", ".join(tags),
-                        "Hashtags": ", ".join(hashtags),
-                        "Views": views,
-                        "Published Date": published_date,
-                        "Transcript": transcript,
-                        "SEO Suggestions": seo_output,
-                        "Thumbnail Image": image_url
-                    }
-
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [executor.submit(process_video_item, v) for v in videos_to_process]
-                    for i, future in enumerate(as_completed(futures), 1):
-                        results.append(future.result())
-                        progress_bar.progress(i / total_videos)
-
-                # Display results
-                for r in results:
-                    st.markdown("---")
-                    st.subheader(f"🎥 {r['Current Title']}")
-                    st.write(f"**Views:** {r['Views']} | **Published:** {r['Published Date']}")
-                    st.write(f"**Description:** {r['Current Description']}")
-                    if r["Tags"]:
-                        st.write(f"**Tags:** {r['Tags']}")
-                    if r["Hashtags"]:
-                        st.write(f"**Hashtags:** {r['Hashtags']}")
-                    if r["Transcript"]:
-                        with st.expander("Transcript"):
-                            st.write(r["Transcript"][:500] + "...")
-                    if r["SEO Suggestions"]:
-                        seo = r["SEO Suggestions"]
-                        st.subheader("✨ SEO Suggestions")
-                        st.write(f"**Optimized Title:** {seo.get('Optimized Title','')}")
-                        st.write(f"**Optimized Description:** {seo.get('Optimized Description','')}")
-                        st.write(f"**Suggested Hashtags:** {', '.join(seo.get('Suggested Hashtags',[]))}")
-                        st.write(f"**Suggested Keywords:** {', '.join(seo.get('Suggested Keywords',[]))}")
-                    if r["Thumbnail Image"]:
-                        st.image(r["Thumbnail Image"], caption="AI-generated Thumbnail", use_container_width=True)
-
-                # Excel export
-                df = pd.DataFrame(results)
-                df['Optimized Title'] = df['SEO Suggestions'].apply(lambda x: x.get('Optimized Title') if isinstance(x, dict) else "")
-                df['Optimized Description'] = df['SEO Suggestions'].apply(lambda x: x.get('Optimized Description') if isinstance(x, dict) else "")
-                df['Suggested Hashtags'] = df['SEO Suggestions'].apply(lambda x: ", ".join(x.get('Suggested Hashtags', [])) if isinstance(x, dict) else "")
-                df['Suggested Keywords'] = df['SEO Suggestions'].apply(lambda x: ", ".join(x.get('Suggested Keywords', [])) if isinstance(x, dict) else "")
-
+            if video_details:
+                df = pd.DataFrame(video_details)
                 output = BytesIO()
-                with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                    df.to_excel(writer, index=False, sheet_name="Videos")
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False)
                 output.seek(0)
-                st.download_button("📥 Download Video Data (Excel)", data=output.getvalue(),
-                                   file_name="video_export.xlsx",
-                                   mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-            except Exception as e:
-                st.error(f"Error: {e}")
+                st.download_button("⬇️ Download Excel", output, "youtube_videos.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ---------------- Tab 2: SEO Topic Analysis ----------------
 with tabs[1]:
-    st.header("🔍 SEO Topic Analysis")
-    youtube_api_key2 = st.text_input("YouTube API Key", key="tab2_yt", type="password")
-    openai_api_key2 = st.text_input("OpenAI API Key", key="tab2_openai", type="password")
-    topics_input = st.text_input("Enter comma-separated keywords/topics", key="tab2_keywords")
-    uploaded_file_tab2 = st.file_uploader("Upload Excel/CSV with keywords (optional)", type=["xlsx","csv"], key="tab2_file")
-    top_n_videos = st.number_input("Number of top videos to analyze per topic", min_value=1, max_value=20, value=5)
-
-    if st.button("Analyze Topics", key="tab2_btn"):
-        if not youtube_api_key2:
+    st.header("📈 SEO Topic Analysis")
+    youtube_api_key_tab2 = st.text_input("YouTube API Key", key="tab2_yt", type="password")
+    openai_api_key_tab2 = st.text_input("OpenAI API Key", key="tab2_openai", type="password")
+    topics_input = st.text_area("Enter Topic/Keyword(s) (comma-separated)", key="tab2_topics")
+    uploaded_file_tab2 = st.file_uploader("Or upload Excel/CSV with topics", type=["csv", "xlsx"], key="tab2_file")
+    top_n = st.number_input("Number of top videos to fetch per keyword", min_value=1, max_value=50, value=10, step=1)
+    
+    if st.button("Analyze SEO Topics", key="tab2_btn"):
+        if uploaded_file_tab2:
+            if uploaded_file_tab2.name.endswith(".xlsx"):
+                df_topics = pd.read_excel(uploaded_file_tab2)
+            else:
+                df_topics = pd.read_csv(uploaded_file_tab2)
+            topics = df_topics.iloc[:, 0].astype(str).tolist()
+        else:
+            topics = [t.strip() for t in topics_input.split(",") if t.strip()]
+        
+        if not youtube_api_key_tab2:
             st.error("YouTube API Key required")
         else:
-            try:
-                youtube2 = build("youtube", "v3", developerKey=youtube_api_key2)
-                client2 = OpenAI(api_key=openai_api_key2) if openai_api_key2 else None
+            youtube = build("youtube", "v3", developerKey=youtube_api_key_tab2)
+            client = OpenAI(api_key=openai_api_key_tab2) if openai_api_key_tab2 else None
+            all_results = []
 
-                # Prepare topics list
-                topics = []
-                if uploaded_file_tab2:
-                    df_upload = pd.read_excel(uploaded_file_tab2) if uploaded_file_tab2.name.endswith(".xlsx") else pd.read_csv(uploaded_file_tab2)
-                    topics = df_upload.iloc[:,0].astype(str).tolist()
-                else:
-                    topics = [t.strip() for t in topics_input.split(",") if t.strip()]
+            for topic in topics:
+                search_res = youtube.search().list(q=topic, part="snippet", type="video", order="viewCount", maxResults=top_n).execute()
+                video_ids = [item["id"]["videoId"] for item in search_res["items"]]
+                for vid in video_ids:
+                    info = get_video_info(youtube, vid)
+                    info["keyword"] = topic
+                    if client:
+                        info["seo_suggestion"] = generate_seo_tags(client, info)
+                    all_results.append(info)
 
-                all_results = []
-
-                for topic in topics:
-                    st.subheader(f"Keyword/Topic: {topic}")
-                    # Search top videos
-                    search_res = youtube2.search().list(q=topic, part="snippet", maxResults=top_n_videos, order="viewCount", type="video").execute()
-                    video_ids = [item["id"]["videoId"] for item in search_res.get("items", [])]
-                    for vid in video_ids:
-                        info_res = youtube2.videos().list(part="snippet,statistics", id=vid).execute()
-                        snippet = info_res["items"][0]["snippet"]
-                        stats = info_res["items"][0].get("statistics", {})
-                        title = snippet["title"]
-                        description = snippet.get("description","")
-                        tags = snippet.get("tags",[])
-                        views = stats.get("viewCount","0")
-                        hashtags = [w for w in description.split() if w.startswith("#")]
-
-                        seo_output = {}
-                        if client2:
-                            seo_output, _ = generate_seo_and_image_structured(client2, title, description, "")
-
-                        result_item = {
-                            "Topic": topic,
-                            "Video ID": vid,
-                            "Title": title,
-                            "Description": description,
-                            "Tags": ", ".join(tags),
-                            "Hashtags": ", ".join(hashtags),
-                            "Views": views,
-                            "SEO Suggestions": seo_output
-                        }
-                        all_results.append(result_item)
-
-                        st.write(f"**Title:** {title} | **Views:** {views}")
-                        st.write(f"**Description:** {description[:200]}...")
-                        st.write(f"**Tags:** {', '.join(tags)}")
-                        st.write(f"**Hashtags:** {', '.join(hashtags)}")
-                        if seo_output:
-                            st.write(f"**SEO Optimized Title:** {seo_output.get('Optimized Title','')}")
-                            st.write(f"**SEO Keywords:** {', '.join(seo_output.get('Suggested Keywords',[]))}")
-
-                # Export Excel
-                if all_results:
-                    df_all = pd.DataFrame(all_results)
-                    df_all['Optimized Title'] = df_all['SEO Suggestions'].apply(lambda x: x.get('Optimized Title') if isinstance(x, dict) else "")
-                    df_all['Optimized Description'] = df_all['SEO Suggestions'].apply(lambda x: x.get('Optimized Description') if isinstance(x, dict) else "")
-                    df_all['Suggested Hashtags'] = df_all['SEO Suggestions'].apply(lambda x: ", ".join(x.get('Suggested Hashtags', [])) if isinstance(x, dict) else "")
-                    df_all['Suggested Keywords'] = df_all['SEO Suggestions'].apply(lambda x: ", ".join(x.get('Suggested Keywords', [])) if isinstance(x, dict) else "")
-
-                    output2 = BytesIO()
-                    with pd.ExcelWriter(output2, engine="xlsxwriter") as writer:
-                        df_all.to_excel(writer, index=False, sheet_name="SEO_Topics")
-                    output2.seek(0)
-                    st.download_button("📥 Download SEO Topic Analysis", data=output2.getvalue(),
-                                       file_name="seo_topic_analysis.xlsx",
-                                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-            except Exception as e:
-                st.error(f"Error: {e}")
+            if all_results:
+                df_res = pd.DataFrame(all_results)
+                st.dataframe(df_res)
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_res.to_excel(writer, index=False)
+                output.seek(0)
+                st.download_button("⬇️ Download SEO Analysis", output, "seo_analysis.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
