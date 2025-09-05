@@ -2,16 +2,22 @@ import streamlit as st
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 import pandas as pd
-import time
-from openai import OpenAI
-import re
 import io
+from openai import OpenAI
 
 # ============ STREAMLIT CONFIG ============
 st.set_page_config(page_title="YouTube SEO Toolkit", layout="wide")
 
 st.title("🎥 YouTube SEO Toolkit")
 st.markdown("Enhance your YouTube strategy with **SEO insights, video data, and trending topics.**")
+
+# Utility: safe join for tags list/str
+def join_tags(tags):
+    if isinstance(tags, list):
+        return ", ".join(tags)
+    if isinstance(tags, str):
+        return tags
+    return ""
 
 # ============ TABS ============
 tab1, tab2, tab3 = st.tabs([
@@ -22,98 +28,190 @@ tab1, tab2, tab3 = st.tabs([
 
 # ================== TAB 1 ==================
 with tab1:
-    st.subheader("📊 Export Your YouTube Channel Videos")
-    youtube_api_key = st.text_input("🔑 Enter YouTube API Key", type="password")
-    channel_id = st.text_input("📺 Enter Channel ID")
+    st.subheader("📊 Export Your YouTube Channel Videos (with optional AI SEO & Thumbnails)")
 
-    if st.button("Fetch Videos", type="primary"):
+    # Keys & channel
+    youtube_api_key = st.text_input("🔑 YouTube API Key (Tab 1)", type="password")
+    openai_api_key_tab1 = st.text_input("🤖 OpenAI API Key (for SEO & Image generation in Tab 1)", type="password")
+    channel_id = st.text_input("📺 Channel ID (e.g. UC_xxx...)")
+
+    # Options
+    num_to_fetch = st.number_input("🎬 How many recent uploads to fetch?", min_value=1, max_value=200, value=30, step=1)
+    enable_seo_tab1 = st.checkbox("✨ Generate SEO suggestions (tags/hashtags/better title) with OpenAI", value=False)
+    enable_images_tab1 = st.checkbox("🖼️ Generate AI thumbnail from video title (OpenAI Images)", value=False)
+
+    if st.button("📥 Fetch Channel Videos", type="primary"):
         if not youtube_api_key or not channel_id:
-            st.warning("⚠️ Please enter both API key and Channel ID.")
+            st.warning("⚠️ Please enter both **YouTube API Key** and **Channel ID**.")
         else:
-            with st.spinner("Fetching videos... Please wait."):
-                try:
-                    youtube = build("youtube", "v3", developerKey=youtube_api_key)
-                    channel_res = youtube.channels().list(part="contentDetails", id=channel_id).execute()
+            # Initialize services
+            client_tab1 = OpenAI(api_key=openai_api_key_tab1) if (openai_api_key_tab1 and (enable_seo_tab1 or enable_images_tab1)) else None
+
+            try:
+                youtube = build("youtube", "v3", developerKey=youtube_api_key)
+
+                # Get uploads playlist
+                channel_res = youtube.channels().list(part="contentDetails", id=channel_id).execute()
+                if not channel_res.get("items"):
+                    st.error("❌ No channel found for that ID.")
+                else:
                     playlist_id = channel_res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
+                    # Fetch playlist items until we reach num_to_fetch
                     all_results = []
                     next_page_token = None
-                    while True:
-                        playlist_items = youtube.playlistItems().list(
-                            part="snippet,contentDetails",
-                            playlistId=playlist_id,
-                            maxResults=50,
-                            pageToken=next_page_token
-                        ).execute()
 
-                        for item in playlist_items["items"]:
-                            video_id = item["contentDetails"]["videoId"]
-                            video_res = youtube.videos().list(
-                                part="snippet,statistics",
-                                id=video_id
+                    with st.spinner("Fetching videos..."):
+                        while len(all_results) < num_to_fetch:
+                            playlist_items = youtube.playlistItems().list(
+                                part="snippet,contentDetails",
+                                playlistId=playlist_id,
+                                maxResults=min(50, num_to_fetch - len(all_results)),
+                                pageToken=next_page_token
                             ).execute()
 
-                            if video_res["items"]:
-                                v = video_res["items"][0]
-                                all_results.append({
-                                    "title": v["snippet"]["title"],
-                                    "video_id": video_id,
-                                    "url": f"https://www.youtube.com/watch?v={video_id}",
-                                    "views": v["statistics"].get("viewCount", "0"),
-                                    "tags": ", ".join(v["snippet"].get("tags", [])),
-                                    "description": v["snippet"].get("description", "")
-                                })
+                            vid_ids_batch = []
+                            for item in playlist_items.get("items", []):
+                                vid_ids_batch.append(item["contentDetails"]["videoId"])
 
-                        next_page_token = playlist_items.get("nextPageToken")
-                        if not next_page_token:
-                            break
+                            if vid_ids_batch:
+                                videos_res = youtube.videos().list(
+                                    part="snippet,statistics",
+                                    id=",".join(vid_ids_batch)
+                                ).execute()
 
-                    # Display cards
-                    for idx, video in enumerate(all_results, 1):
+                                for v in videos_res.get("items", []):
+                                    video_id = v["id"]
+                                    all_results.append({
+                                        "title": v["snippet"]["title"],
+                                        "video_id": video_id,
+                                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                                        "views": v["statistics"].get("viewCount", "0"),
+                                        "tags": join_tags(v["snippet"].get("tags", [])),
+                                        "description": v["snippet"].get("description", "")
+                                    })
+
+                            next_page_token = playlist_items.get("nextPageToken")
+                            if not next_page_token:
+                                break
+
+                    # Generate optional AI outputs
+                    progress = st.progress(0)
+                    enriched_rows = []
+                    total = len(all_results)
+
+                    for idx, video in enumerate(all_results, start=1):
+                        row = {**video}
+                        # SEO suggestions
+                        if enable_seo_tab1:
+                            if client_tab1 is None:
+                                row["seo_suggestions"] = "OpenAI API key missing."
+                            else:
+                                try:
+                                    prompt = (
+                                        "You are a YouTube SEO expert. Based on the following video info, "
+                                        "suggest:\n- 10 SEO-friendly tags (comma separated)\n"
+                                        "- 10 hashtags (comma separated)\n"
+                                        "- A better, keyword-rich title (<=70 chars)\n\n"
+                                        f"Title: {video['title']}\n"
+                                        f"Description: {video['description']}\n"
+                                        f"Existing tags: {video['tags']}\n"
+                                    )
+                                    seo_output = client_tab1.chat.completions.create(
+                                        model="gpt-4o-mini",
+                                        messages=[
+                                            {"role": "system", "content": "You are an SEO expert."},
+                                            {"role": "user", "content": prompt}
+                                        ]
+                                    )
+                                    row["seo_suggestions"] = seo_output.choices[0].message.content
+                                except Exception as e:
+                                    row["seo_suggestions"] = f"SEO generation error: {e}"
+
+                        # AI thumbnail
+                        if enable_images_tab1:
+                            if client_tab1 is None:
+                                row["ai_image_url"] = ""
+                            else:
+                                try:
+                                    img = client_tab1.images.generate(
+                                        model="gpt-image-1",
+                                        prompt=f"YouTube thumbnail for: {video['title']}. High-contrast, bold title text, dramatic composition, eye-catching.",
+                                        size="512x512"
+                                    )
+                                    row["ai_image_url"] = img.data[0].url
+                                except Exception as e:
+                                    row["ai_image_url"] = ""
+                                    st.warning(f"Image generation failed for “{video['title']}”: {e}")
+                        enriched_rows.append(row)
+                        progress.progress(idx / max(total, 1))
+
+                    # Show cards
+                    st.markdown("---")
+                    st.markdown(f"### ✅ Fetched {len(enriched_rows)} videos")
+
+                    for i, video in enumerate(enriched_rows, start=1):
                         with st.container():
-                            st.markdown(f"### {idx}. [{video['title']}]({video['url']})")
+                            st.markdown(f"#### {i}. [{video['title']}]({video['url']})")
                             cols = st.columns([1, 3])
+
+                            # Thumbnail preference: AI image if generated, else YouTube thumbnail
+                            preferred_image_url = video.get("ai_image_url") or f"https://img.youtube.com/vi/{video['video_id']}/hqdefault.jpg"
                             with cols[0]:
-                                st.image(f"https://img.youtube.com/vi/{video['video_id']}/hqdefault.jpg", use_container_width=True)
+                                st.image(preferred_image_url, use_container_width=True)
+                                if video.get("ai_image_url"):
+                                    with st.expander("🖼️ View default YouTube thumbnail"):
+                                        st.image(f"https://img.youtube.com/vi/{video['video_id']}/hqdefault.jpg", use_container_width=True)
+
                             with cols[1]:
                                 st.markdown(f"**👁️ Views:** {video['views']}")
-                                st.markdown(f"**🏷️ Tags:** {video['tags'] if video['tags'] else 'N/A'}")
-                                st.markdown(f"**📝 Description:** {video['description'][:200]}...")
+                                st.markdown(f"**🏷️ Tags:** {video['tags'] or 'N/A'}")
+                                st.markdown(f"**📝 Description:** {video['description'][:240]}...")
+
+                                if enable_seo_tab1:
+                                    with st.expander("✨ SEO Suggestions"):
+                                        st.write(video.get("seo_suggestions", "N/A"))
 
                     # Excel export
-                    df = pd.DataFrame(all_results)
-                    buffer = io.BytesIO()
-                    df.to_excel(buffer, index=False)
-                    st.download_button("📥 Download Excel", buffer.getvalue(), "videos.xlsx", "application/vnd.ms-excel")
+                    if enriched_rows:
+                        df = pd.DataFrame(enriched_rows)
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                            df.to_excel(writer, index=False, sheet_name="Videos")
+                        buffer.seek(0)
+                        st.download_button(
+                            "📥 Download Excel",
+                            data=buffer,
+                            file_name="channel_videos.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
 
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
-
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
 
 # ================== TAB 2 ==================
 with tab2:
     st.subheader("🔍 SEO Topic Analysis")
-    openai_api_key = st.text_input("🔑 Enter OpenAI API Key", type="password")
-    youtube_api_key_2 = st.text_input("🔑 Enter YouTube API Key", type="password", key="yt2")
+    openai_api_key = st.text_input("🔑 OpenAI API Key (Tab 2)", type="password")
+    youtube_api_key_2 = st.text_input("🔑 YouTube API Key (Tab 2)", type="password", key="yt2")
 
-    # Keyword input options
     keywords_input = st.text_area("Enter Topic/Keyword(s) (comma separated)")
-    uploaded_keywords = st.file_uploader("📂 Or upload Excel/CSV with keywords", type=["csv", "xlsx"])
+    uploaded_keywords = st.file_uploader("📂 Or upload Excel/CSV with keywords (first column)", type=["csv", "xlsx"])
     video_count = st.slider("How many top videos per keyword?", 5, 20, 10)
 
     if st.button("Analyze SEO Topics", type="primary"):
         if not openai_api_key or not youtube_api_key_2:
             st.warning("⚠️ Please enter both API keys.")
         else:
-            # Process keywords
+            # Build list of keywords
             keywords = []
             if uploaded_keywords is not None:
                 try:
                     if uploaded_keywords.name.endswith(".csv"):
-                        df = pd.read_csv(uploaded_keywords)
+                        df_kw = pd.read_csv(uploaded_keywords)
                     else:
-                        df = pd.read_excel(uploaded_keywords)
-                    keywords = df.iloc[:, 0].dropna().astype(str).tolist()
+                        df_kw = pd.read_excel(uploaded_keywords)
+                    keywords = df_kw.iloc[:, 0].dropna().astype(str).tolist()
                 except Exception as e:
                     st.error(f"Error reading uploaded file: {e}")
             elif keywords_input:
@@ -124,8 +222,8 @@ with tab2:
             else:
                 youtube = build("youtube", "v3", developerKey=youtube_api_key_2)
                 client = OpenAI(api_key=openai_api_key)
-                seo_results = []
 
+                seo_results = []
                 for keyword in keywords:
                     st.markdown(f"### 🔑 Keyword: **{keyword}**")
                     with st.spinner(f"Analyzing top {video_count} videos for '{keyword}'..."):
@@ -137,21 +235,22 @@ with tab2:
                             maxResults=video_count
                         ).execute()
 
-                        for idx, item in enumerate(search_res["items"], 1):
+                        for idx, item in enumerate(search_res.get("items", []), 1):
                             video_id = item["id"]["videoId"]
                             video_res = youtube.videos().list(
                                 part="snippet,statistics",
                                 id=video_id
                             ).execute()
-                            if not video_res["items"]:
+                            if not video_res.get("items"):
                                 continue
+
                             v = video_res["items"][0]
                             video_info = {
                                 "keyword": keyword,
                                 "title": v["snippet"]["title"],
                                 "url": f"https://www.youtube.com/watch?v={video_id}",
                                 "views": v["statistics"].get("viewCount", "0"),
-                                "tags": ", ".join(v["snippet"].get("tags", [])),
+                                "tags": join_tags(v["snippet"].get("tags", [])),
                                 "description": v["snippet"].get("description", "")
                             }
 
@@ -162,10 +261,10 @@ with tab2:
                                     st.image(f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg", use_container_width=True)
                                 with cols[1]:
                                     st.markdown(f"**👁️ Views:** {video_info['views']}")
-                                    st.markdown(f"**🏷️ Tags:** {video_info['tags'] if video_info['tags'] else 'N/A'}")
+                                    st.markdown(f"**🏷️ Tags:** {video_info['tags'] or 'N/A'}")
                                     st.markdown(f"**📝 Description:** {video_info['description'][:200]}...")
 
-                            # SEO Suggestions
+                            # SEO Suggestions from OpenAI
                             with st.expander("✨ Suggested SEO Tags & Hashtags"):
                                 try:
                                     seo_output = client.chat.completions.create(
@@ -187,19 +286,20 @@ with tab2:
                 if seo_results:
                     df = pd.DataFrame(seo_results)
                     buffer = io.BytesIO()
-                    df.to_excel(buffer, index=False)
-                    st.download_button("📥 Download SEO Analysis", buffer.getvalue(), "seo_analysis.xlsx", "application/vnd.ms-excel")
-
+                    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                        df.to_excel(writer, index=False, sheet_name="SEO Analysis")
+                    buffer.seek(0)
+                    st.download_button("📥 Download SEO Analysis", buffer, "seo_analysis.xlsx",
+                                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ================== TAB 3 ==================
 with tab3:
     st.subheader("📈 Trending Topic Discovery")
-    openai_api_key_3 = st.text_input("🔑 Enter OpenAI API Key", type="password", key="ai3")
-    youtube_api_key_3 = st.text_input("🔑 Enter YouTube API Key", type="password", key="yt3")
+    openai_api_key_3 = st.text_input("🔑 OpenAI API Key (Tab 3)", type="password", key="ai3")
+    youtube_api_key_3 = st.text_input("🔑 YouTube API Key (Tab 3)", type="password", key="yt3")
 
-    # Topic input options
     topics_input = st.text_area("Enter Base Topic(s) (comma separated)")
-    uploaded_topics = st.file_uploader("📂 Or upload Excel/CSV with topics", type=["csv", "xlsx"], key="topics_upload")
+    uploaded_topics = st.file_uploader("📂 Or upload Excel/CSV with topics (first column)", type=["csv", "xlsx"], key="topics_upload")
     video_count_trend = st.slider("How many top videos per topic?", 5, 20, 10)
 
     if st.button("Discover Trending Topics", type="primary"):
@@ -210,10 +310,10 @@ with tab3:
             if uploaded_topics is not None:
                 try:
                     if uploaded_topics.name.endswith(".csv"):
-                        df = pd.read_csv(uploaded_topics)
+                        df_tp = pd.read_csv(uploaded_topics)
                     else:
-                        df = pd.read_excel(uploaded_topics)
-                    topics = df.iloc[:, 0].dropna().astype(str).tolist()
+                        df_tp = pd.read_excel(uploaded_topics)
+                    topics = df_tp.iloc[:, 0].dropna().astype(str).tolist()
                 except Exception as e:
                     st.error(f"Error reading uploaded file: {e}")
             elif topics_input:
@@ -237,13 +337,13 @@ with tab3:
                             maxResults=video_count_trend
                         ).execute()
 
-                        for idx, item in enumerate(search_res["items"], 1):
+                        for idx, item in enumerate(search_res.get("items", []), 1):
                             video_id = item["id"]["videoId"]
                             video_res = youtube.videos().list(
                                 part="snippet,statistics",
                                 id=video_id
                             ).execute()
-                            if not video_res["items"]:
+                            if not video_res.get("items"):
                                 continue
                             v = video_res["items"][0]
                             video_info = {
@@ -251,7 +351,7 @@ with tab3:
                                 "title": v["snippet"]["title"],
                                 "url": f"https://www.youtube.com/watch?v={video_id}",
                                 "views": v["statistics"].get("viewCount", "0"),
-                                "tags": ", ".join(v["snippet"].get("tags", [])),
+                                "tags": join_tags(v["snippet"].get("tags", [])),
                                 "description": v["snippet"].get("description", "")
                             }
 
@@ -262,7 +362,7 @@ with tab3:
                                     st.image(f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg", use_container_width=True)
                                 with cols[1]:
                                     st.markdown(f"**👁️ Views:** {video_info['views']}")
-                                    st.markdown(f"**🏷️ Tags:** {video_info['tags'] if video_info['tags'] else 'N/A'}")
+                                    st.markdown(f"**🏷️ Tags:** {video_info['tags'] or 'N/A'}")
                                     st.markdown(f"**📝 Description:** {video_info['description'][:200]}...")
 
                             with st.expander("🚀 Trending Topic Insights"):
@@ -286,5 +386,8 @@ with tab3:
                 if trend_results:
                     df = pd.DataFrame(trend_results)
                     buffer = io.BytesIO()
-                    df.to_excel(buffer, index=False)
-                    st.download_button("📥 Download Trending Topics", buffer.getvalue(), "trending_topics.xlsx", "application/vnd.ms-excel")
+                    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                        df.to_excel(writer, index=False, sheet_name="Trending")
+                    buffer.seek(0)
+                    st.download_button("📥 Download Trending Topics", buffer, "trending_topics.xlsx",
+                                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
