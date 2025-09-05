@@ -16,29 +16,37 @@ st.markdown(
     "Optionally generate SEO titles/descriptions, transcripts, and images from video titles."
 )
 
-# ---------------- Mode Selection ----------------
-mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
+# ---------------- Tabs ----------------
+tab1, tab2 = st.tabs(["Video Export", "SEO Topic Analysis"])
 
-# ---------------- Input Form ----------------
-with st.form(key="form"):
-    yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
-    openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO & Images)", type="password")
-    seo_topic = st.text_input("📈 (Optional) Topic for analyzing top-ranking SEO tags")
+# ---------------- Tab 1: Video Export ----------------
+with tab1:
+    mode = st.radio("🔍 Select Mode", ["Batch Mode", "Single Video", "Upload URLs"], horizontal=True)
 
-    if mode == "Batch Mode":
-        channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
-        batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
-        start_index = (batch_number - 1) * 500
-        num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
-    elif mode == "Single Video":
-        video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
-    else:
-        uploaded_file = st.file_uploader("📄 Upload CSV or TXT with YouTube Video URLs", type=["csv", "txt"])
+    with st.form(key="video_form"):
+        yt_api_key = st.text_input("🔑 YouTube API Key", type="password")
+        openai_key_input = st.text_input("🤖 OpenAI API Key (optional - for SEO & Images)", type="password")
 
-    enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
-    enable_transcript = st.checkbox("📝 Generate Transcripts")
-    enable_images = st.checkbox("🖼️ Generate Images from Video Title")
-    submit = st.form_submit_button("📥 Fetch Video(s)")
+        if mode == "Batch Mode":
+            channel_id = st.text_input("📡 YouTube Channel ID (e.g. UC_xxx...)")
+            batch_number = st.selectbox("📦 Select Batch (500 videos each)", options=list(range(1, 21)), index=0)
+            start_index = (batch_number - 1) * 500
+            num_videos = st.number_input("🎬 Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
+        elif mode == "Single Video":
+            video_id_input = st.text_input("🎥 Enter Video ID (e.g. dQw4w9WgXcQ)")
+        else:
+            uploaded_file = st.file_uploader("📄 Upload CSV or TXT with YouTube Video URLs", type=["csv", "txt"])
+
+        enable_seo = st.checkbox("✨ Enable SEO Tagging using ChatGPT")
+        enable_transcript = st.checkbox("📝 Generate Transcripts")
+        enable_images = st.checkbox("🖼️ Generate Images from Video Title")
+        submit = st.form_submit_button("📥 Fetch Video(s)")
+
+# ---------------- Tab 2: SEO Topic Analysis ----------------
+with tab2:
+    st.markdown("### 🔍 Analyze Top-Ranking SEO Tags for a Topic")
+    seo_topic_input = st.text_input("📈 Enter Topic for SEO Analysis (e.g. Python Tutorials)")
+    analyze_seo = st.button("Analyze SEO Tags")
 
 # ---------------- OpenAI Client ----------------
 effective_openai_key = openai_key_input or st.secrets.get("OPENAI_API_KEY", "")
@@ -89,7 +97,6 @@ def get_video_info(youtube, video_id):
         "url": f"https://www.youtube.com/watch?v={video_id}"
     }
 
-# ---------------- Transcript Function ----------------
 def fetch_transcript(video_id):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -100,7 +107,6 @@ def fetch_transcript(video_id):
     except Exception:
         return "Transcript not found"
 
-# ---------------- SEO Function ----------------
 def generate_seo_tags(video):
     if not client:
         return "OpenAI API key missing"
@@ -126,7 +132,6 @@ def generate_seo_tags(video):
     except Exception as e:
         return f"Error generating SEO: {e}"
 
-# ---------------- Image Generation Function ----------------
 def generate_image(prompt):
     if not client:
         return None
@@ -141,7 +146,6 @@ def generate_image(prompt):
         st.warning(f"Image generation failed for '{prompt}': {e}")
         return None
 
-# ---------------- Extract IDs from Uploaded File ----------------
 def extract_video_ids_from_urls(file):
     content = file.read().decode("utf-8")
     urls = content.splitlines()
@@ -152,7 +156,6 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
-# ---------------- Process Video ----------------
 def process_video(video):
     if enable_seo:
         video["seo_output"] = generate_seo_tags(video)
@@ -162,7 +165,7 @@ def process_video(video):
         video["image_url"] = generate_image(video["title"])
     return video
 
-# ---------------- Fetch Videos ----------------
+# ---------------- Tab 1: Fetch Videos ----------------
 if submit:
     if not yt_api_key:
         st.error("YouTube API Key required")
@@ -188,14 +191,12 @@ if submit:
             video_details = []
             total_videos = len(videos_to_process)
 
-            # Use threads to speed up API calls
             with ThreadPoolExecutor(max_workers=5) as executor:
                 futures = [executor.submit(process_video, v) for v in videos_to_process]
                 for i, future in enumerate(as_completed(futures), 1):
                     video_details.append(future.result())
                     progress_bar.progress(i / total_videos)
 
-            # Display & Download
             if video_details:
                 for video in video_details:
                     st.markdown("---")
@@ -220,3 +221,24 @@ if submit:
 
         except Exception as e:
             st.error(f"Error: {e}")
+
+# ---------------- Tab 2: SEO Topic Analysis ----------------
+if analyze_seo:
+    if not client:
+        st.error("OpenAI API key is required for SEO analysis")
+    elif not seo_topic_input:
+        st.warning("Please enter a topic to analyze")
+    else:
+        # Example simple analysis: generate top tags for the topic
+        try:
+            st.info(f"Analyzing SEO for topic: {seo_topic_input}")
+            prompt = f"List 20 trending SEO keywords for YouTube videos on the topic: {seo_topic_input}"
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            tags_output = response.choices[0].message.content
+            st.success("✅ SEO Keywords:")
+            st.write(tags_output)
+        except Exception as e:
+            st.error(f"Error generating SEO tags: {e}")
