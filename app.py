@@ -213,6 +213,8 @@ if submit:
                 st.write(", ".join(top_tags))
 
             video_details = []
+
+            # ---------------- Mode: Batch ----------------
             if mode == "Batch Mode":
                 if not channel_id:
                     st.error("❌ Please enter Channel ID.")
@@ -229,4 +231,114 @@ if submit:
                         for v in selected_batch:
                             info = get_video_info(youtube, v["video_id"])
                             if enable_seo:
-                                info["seo_output
+                                info["seo_output"] = generate_seo_tags(info, top_tags)
+                                time.sleep(5)
+                            if enable_transcript:
+                                info["transcript"] = fetch_transcript(v["video_id"])
+                            if enable_images:
+                                img_url, err = generate_image(info["title"])
+                                info["image_url"] = img_url if img_url else err
+                            video_details.append(info)
+
+            # ---------------- Mode: Single ----------------
+            elif mode == "Single Video":
+                if not video_id_input:
+                    st.error("❌ Please enter a Video ID.")
+                else:
+                    with st.spinner("🔍 Fetching video..."):
+                        info = get_video_info(youtube, video_id_input)
+                        if "error" in info:
+                            st.error(f"❌ {info['error']}")
+                        else:
+                            if enable_seo:
+                                info["seo_output"] = generate_seo_tags(info, top_tags)
+                                time.sleep(5)
+                            if enable_transcript:
+                                info["transcript"] = fetch_transcript(video_id_input)
+                            if enable_images:
+                                img_url, err = generate_image(info["title"])
+                                info["image_url"] = img_url if img_url else err
+                            video_details.append(info)
+
+            # ---------------- Mode: Upload ----------------
+            elif mode == "Upload URLs":
+                if not uploaded_file:
+                    st.error("❌ Please upload a file with video URLs.")
+                else:
+                    video_ids = extract_video_ids_from_urls(uploaded_file)
+                    with st.spinner("📄 Processing uploaded video URLs..."):
+                        for vid in video_ids:
+                            info = get_video_info(youtube, vid)
+                            if enable_seo:
+                                info["seo_output"] = generate_seo_tags(info, top_tags)
+                                time.sleep(5)
+                            if enable_transcript:
+                                info["transcript"] = fetch_transcript(vid)
+                            if enable_images:
+                                img_url, err = generate_image(info["title"])
+                                info["image_url"] = img_url if img_url else err
+                            video_details.append(info)
+
+            # ---------------- Display Preview Cards ----------------
+            if video_details:
+                st.markdown("## 🎬 Video Preview Cards")
+                for idx, video in enumerate(video_details):
+                    st.markdown("---")
+                    cols = st.columns([1, 2])
+                    with cols[0]:
+                        img_url = video.get("image_url")
+                        if img_url and "http" in img_url:
+                            st.image(img_url, use_column_width=True)
+                        else:
+                            st.write(img_url)
+                    with cols[1]:
+                        st.markdown(f"**Title:** [{video['title']}]({video['url']})")
+                        st.markdown(f"**Views:** {video['views']}  |  **Published:** {video['published_date']}")
+                        if enable_seo and video.get("seo_output"):
+                            with st.expander("SEO Output"):
+                                st.write(video['seo_output'])
+                        if enable_transcript and video.get("transcript"):
+                            snippet = video['transcript'][:300] + "..." if len(video['transcript']) > 300 else video['transcript']
+                            with st.expander("Transcript Snippet"):
+                                st.write(snippet)
+
+                # ---------------- Excel Download ----------------
+                df = pd.DataFrame(video_details)
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False, sheet_name="Videos")
+                output.seek(0)
+                st.download_button(
+                    label=f"⬇️ Download Excel",
+                    data=output,
+                    file_name="youtube_videos.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+                # ---------------- Images ZIP Download ----------------
+                if enable_images:
+                    image_files = []
+                    for idx, video in enumerate(video_details):
+                        img_url = video.get("image_url")
+                        if img_url and "http" in img_url:
+                            try:
+                                response = requests.get(img_url)
+                                if response.status_code == 200:
+                                    image_files.append((f"{idx+1}_{video['video_id']}.png", response.content))
+                            except Exception as e:
+                                st.write(f"❌ Failed to fetch image: {e}")
+                    if image_files:
+                        zip_buffer = io.BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+                            for filename, data in image_files:
+                                zip_file.writestr(filename, data)
+                        zip_buffer.seek(0)
+                        st.download_button(
+                            label="⬇️ Download All Images as ZIP",
+                            data=zip_buffer,
+                            file_name="youtube_images.zip",
+                            mime="application/zip"
+                        )
+
+        except HttpError as e:
+            st.error(f"API Error: {e}")
