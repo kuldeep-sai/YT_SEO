@@ -3,4 +3,4 @@ pandas
 google-api-python-client
 youtube-transcript-api
 openai
-requests
+xlsxwriter
