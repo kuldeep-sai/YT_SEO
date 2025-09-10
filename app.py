@@ -6,7 +6,6 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 from openai import OpenAI
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Exporter + SEO + Images", layout="centered")
@@ -142,7 +141,7 @@ with tabs[0]:
         video_id_input = st.text_input("Enter Video ID", key="tab1_single_vid")
     elif mode_tab1 == "Batch Mode":
         channel_id = st.text_input("YouTube Channel ID", key="tab1_channel")
-        num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=50, value=10, step=1)
+        num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=500, value=10, step=1)  # <-- UPDATED
     else:
         uploaded_file_tab1 = st.file_uploader("Upload CSV/TXT with Video URLs", type=["csv", "txt"], key="tab1_file")
 
