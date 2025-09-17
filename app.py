@@ -8,8 +8,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- Page Setup ----------------
-st.set_page_config(page_title="YouTube Exporter + SEO + Images", layout="centered")
-st.title("📊 YouTube Video Exporter + SEO + Transcript + Images")
+st.set_page_config(page_title="YouTube Analysis", layout="centered")
+st.title("📊 YouTube Video Exporter + SEO Recommendations")
 st.markdown(
     "Export videos from YouTube channel, single video, or uploaded list. "
     "Optionally generate SEO titles/descriptions, transcripts, and images from video titles."
