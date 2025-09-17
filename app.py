@@ -131,7 +131,7 @@ def process_video(video, client, enable_seo, enable_transcript, enable_images):
 
 # ---------------- Tab 1: Video Export ----------------
 with tabs[0]:
-    st.header("🎥 Video Export + SEO + Images + Transcript")
+    st.header("🎥 Video Export + SEO Tags + Images + Transcript")
     youtube_api_key = st.text_input("YouTube API Key", key="tab1_yt", type="password")
     openai_api_key = st.text_input("OpenAI API Key (SEO & Images)", key="tab1_openai", type="password")
     
