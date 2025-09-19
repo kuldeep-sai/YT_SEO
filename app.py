@@ -5,7 +5,6 @@ from io import BytesIO
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from openai import OpenAI
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Analysis", layout="centered")
@@ -96,14 +95,14 @@ def generate_seo_tags(client, video):
     except Exception as e:
         return f"Error generating SEO: {e}"
 
-def generate_image(client, prompt):
+def generate_image(client, prompt, size):
     if not client:
         return None
     try:
         response = client.images.generate(
             model="gpt-image-1",
             prompt=f"Thumbnail for: {prompt}",
-            size="512x512"
+            size=size
         )
         return response.data[0].url
     except Exception as e:
@@ -120,13 +119,13 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
-def process_video(video, client, enable_seo, enable_transcript, enable_images):
+def process_video(video, client, enable_seo, enable_transcript, enable_images, image_size):
     if enable_seo:
         video["seo_output"] = generate_seo_tags(client, video)
     if enable_transcript:
         video["transcript"] = fetch_transcript(video["video_id"])
     if enable_images:
-        video["image_url"] = generate_image(client, video["title"])
+        video["image_url"] = generate_image(client, video["title"], image_size)
     return video
 
 # ---------------- Tab 1: Video Export ----------------
@@ -134,20 +133,28 @@ with tabs[0]:
     st.header("🎥 Video Export + SEO Tags + Images + Transcript")
     youtube_api_key = st.text_input("YouTube API Key", key="tab1_yt", type="password")
     openai_api_key = st.text_input("OpenAI API Key (SEO & Images)", key="tab1_openai", type="password")
-    
+
     mode_tab1 = st.radio("Select Mode", ["Single Video", "Batch Mode", "Upload URLs"], key="tab1_mode")
-    
+
     if mode_tab1 == "Single Video":
         video_id_input = st.text_input("Enter Video ID", key="tab1_single_vid")
     elif mode_tab1 == "Batch Mode":
         channel_id = st.text_input("YouTube Channel ID", key="tab1_channel")
-        num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=500, value=10, step=1)  # <-- UPDATED
+        num_videos = st.number_input("Number of videos to fetch", min_value=1, max_value=500, value=10, step=1)
     else:
         uploaded_file_tab1 = st.file_uploader("Upload CSV/TXT with Video URLs", type=["csv", "txt"], key="tab1_file")
 
     enable_seo = st.checkbox("Enable SEO suggestions", key="tab1_seo")
     enable_images = st.checkbox("Enable AI Thumbnail", key="tab1_img")
     enable_transcript = st.checkbox("Enable Transcript", key="tab1_transcript")
+
+    image_size = "1024x1024"
+    if enable_images:
+        image_size = st.selectbox(
+            "Select Image Size",
+            ["1024x1024", "1024x1536", "1536x1024", "auto"],
+            index=0
+        )
 
     if st.button("Fetch Videos", key="tab1_btn"):
         if not youtube_api_key:
@@ -173,8 +180,9 @@ with tabs[0]:
 
             video_details = []
             for v in videos_to_process:
-                video_details.append(process_video(v, client, enable_seo, enable_transcript, enable_images))
+                video_details.append(process_video(v, client, enable_seo, enable_transcript, enable_images, image_size))
 
+            # Display details
             for video in video_details:
                 st.markdown("---")
                 st.markdown(f"**Title:** [{video['title']}]({video['url']})")
@@ -187,8 +195,15 @@ with tabs[0]:
                 if enable_seo and video.get("seo_output"):
                     with st.expander("SEO Output"):
                         st.write(video["seo_output"])
-                if enable_images and video.get("image_url"):
-                    st.image(video["image_url"], use_container_width=True)
+
+            # Show thumbnails in a grid view
+            if enable_images:
+                st.subheader("🖼️ Generated Thumbnails")
+                cols = st.columns(3)
+                for idx, video in enumerate(video_details):
+                    if video.get("image_url"):
+                        with cols[idx % 3]:
+                            st.image(video["image_url"], caption=video["title"], use_container_width=True)
 
             if video_details:
                 df = pd.DataFrame(video_details)
@@ -207,7 +222,7 @@ with tabs[1]:
     topics_input = st.text_area("Enter Topic/Keyword(s) (comma-separated)", key="tab2_topics")
     uploaded_file_tab2 = st.file_uploader("Or upload Excel/CSV with topics", type=["csv", "xlsx"], key="tab2_file")
     top_n = st.number_input("Number of top videos to fetch per keyword", min_value=1, max_value=50, value=10, step=1)
-    
+
     if st.button("Analyze SEO Topics", key="tab2_btn"):
         if uploaded_file_tab2:
             if uploaded_file_tab2.name.endswith(".xlsx"):
@@ -217,7 +232,7 @@ with tabs[1]:
             topics = df_topics.iloc[:, 0].astype(str).tolist()
         else:
             topics = [t.strip() for t in topics_input.split(",") if t.strip()]
-        
+
         if not youtube_api_key_tab2:
             st.error("YouTube API Key required")
         else:
