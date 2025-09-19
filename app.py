@@ -4,7 +4,7 @@ import pandas as pd
 from io import BytesIO
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from openai import OpenAI
-import reac
+import re
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Analysis", layout="centered")
