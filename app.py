@@ -5,6 +5,7 @@ from io import BytesIO
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from openai import OpenAI
 import re
+import requests
 
 # ---------------- Page Setup ----------------
 st.set_page_config(page_title="YouTube Analysis", layout="centered")
@@ -95,7 +96,7 @@ def generate_seo_tags(client, video):
     except Exception as e:
         return f"Error generating SEO: {e}"
 
-def generate_image(client, prompt, size):
+def generate_image_openai(client, prompt, size):
     if not client:
         return None
     try:
@@ -106,7 +107,24 @@ def generate_image(client, prompt, size):
         )
         return response.data[0].url
     except Exception as e:
-        st.warning(f"Image generation failed for '{prompt}': {e}")
+        st.warning(f"OpenAI image generation failed for '{prompt}': {e}")
+        return None
+
+def generate_image_gemini(api_key, prompt, size="1024x1024"):
+    if not api_key:
+        return None
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"}
+        payload = {
+            "prompt": f"Thumbnail for: {prompt}",
+            "size": size
+        }
+        response = requests.post("https://api.gemini.com/v1/images/generate", json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("url")  # adjust according to Gemini API response
+    except Exception as e:
+        st.warning(f"Gemini image generation failed for '{prompt}': {e}")
         return None
 
 def extract_video_ids_from_urls(file):
@@ -119,13 +137,16 @@ def extract_video_ids_from_urls(file):
             ids.append(match.group(1))
     return ids
 
-def process_video(video, client, enable_seo, enable_transcript, enable_images, image_size):
+def process_video(video, client, enable_seo, enable_transcript, enable_images, image_size, gemini_key=None):
     if enable_seo:
         video["seo_output"] = generate_seo_tags(client, video)
     if enable_transcript:
         video["transcript"] = fetch_transcript(video["video_id"])
     if enable_images:
-        video["image_url"] = generate_image(client, video["title"], image_size)
+        if gemini_key:
+            video["image_url"] = generate_image_gemini(gemini_key, video["title"], image_size)
+        else:
+            video["image_url"] = generate_image_openai(client, video["title"], image_size)
     return video
 
 # ---------------- Tab 1: Video Export ----------------
@@ -133,6 +154,7 @@ with tabs[0]:
     st.header("🎥 Video Export + SEO Tags + Images + Transcript")
     youtube_api_key = st.text_input("YouTube API Key", key="tab1_yt", type="password")
     openai_api_key = st.text_input("OpenAI API Key (SEO & Images)", key="tab1_openai", type="password")
+    gemini_api_key = st.text_input("Gemini API Key (AI Thumbnails)", key="tab1_gemini", type="password")
 
     mode_tab1 = st.radio("Select Mode", ["Single Video", "Batch Mode", "Upload URLs"], key="tab1_mode")
 
@@ -180,7 +202,9 @@ with tabs[0]:
 
             video_details = []
             for v in videos_to_process:
-                video_details.append(process_video(v, client, enable_seo, enable_transcript, enable_images, image_size))
+                video_details.append(
+                    process_video(v, client, enable_seo, enable_transcript, enable_images, image_size, gemini_key=gemini_api_key)
+                )
 
             # Display details
             for video in video_details:
@@ -205,6 +229,7 @@ with tabs[0]:
                         with cols[idx % 3]:
                             st.image(video["image_url"], caption=video["title"], use_container_width=True)
 
+            # Export Excel
             if video_details:
                 df = pd.DataFrame(video_details)
                 output = BytesIO()
